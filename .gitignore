@@ -1,0 +1,18 @@
+# Build output
+*.exe
+*.pdb
+bin/
+obj/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editors
+Thumbs.db
+desktop.ini
+.DS_Store
+.vs/
+.vscode/
+*.user
