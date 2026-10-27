@@ -39,12 +39,13 @@ teh ␣     →  the ␣
 
 ## دانلود و اجرا
 
-1. فایل `TypeAssist-1.3.0.zip` را از [صفحهٔ آخرین نسخه](https://github.com/mkovich/TypeAssist/releases/latest) دانلود کنید و از zip بیرون بیاورید (مثلاً در `C:\Tools\TypeAssist`).
+1. فایل `TypeAssist-1.4.0.zip` را از [صفحهٔ آخرین نسخه](https://github.com/mkovich/TypeAssist/releases/latest) دانلود کنید و از zip بیرون بیاورید (مثلاً در `C:\Tools\TypeAssist`).
 2. `TypeAssist.exe` را اجرا کنید. با .NET Framework 4.8 کار می‌کند که در ویندوز ۱۰ و ۱۱ از قبل هست.
 3. **هشدار SmartScreen ویندوز:** چون فایل امضای دیجیتال ندارد، ممکن است ویندوز پیام «Windows protected your PC» نشان دهد.
    روی **More info** و بعد **Run anyway** بزنید. این برای برنامه‌های کوچک متن‌باز بدون امضا عادی است و نشانهٔ مشکل نیست.
 4. آیکون سبز «Aa» کنار ساعت ظاهر می‌شود. چند ثانیهٔ اول که واژه‌نامه بارگذاری می‌شود، خاکستری است.
-5. برای اجرای خودکار با ویندوز: راست‌کلیک روی آیکون ← **Start with Windows**.
+5. برای اجرای خودکار با ویندوز: راست‌کلیک روی آیکون ← **Start with Windows**. برنامه یک نسخه از خودش را در
+   `%LocalAppData%\Programs\TypeAssist` کپی و همان را ثبت می‌کند؛ پس پوشهٔ دانلود را می‌توانید پاک یا جابه‌جا کنید.
 
 > بعضی آنتی‌ویروس‌ها به هر برنامه‌ای که صفحه‌کلید را می‌خواند مشکوک‌اند، چون کی‌لاگرها هم همین کار را می‌کنند.
 > TypeAssist کلیدها را فقط برای اصلاح می‌خواند و هیچ راهی برای فرستادن چیزی به بیرون ندارد. اگر شک دارید، خودتان از روی سورس بسازید.
@@ -111,7 +112,7 @@ tests\run_tests.bat    :: تست‌ها را اجرا می‌کند
 
 ## مجوز
 
-کد با مجوز [MIT](LICENSE) © 2026 MH.Kovich.
+کد با مجوز [MIT](LICENSE) © 2026 MH.Kovich · [mkovich.com](https://mkovich.com).
 داده‌های زبانی از wordfreq، codespell، NLTK و Persian-NER با مجوزهای خودشان آمده‌اند. جزئیات در [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 </div>

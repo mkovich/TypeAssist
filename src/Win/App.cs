@@ -11,14 +11,17 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("TypeAssist")]
 [assembly: AssemblyDescription("Autocorrect and word suggestions for Persian and English, in every Windows app")]
 [assembly: AssemblyProduct("TypeAssist")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyCompany("mkovich.com")]
+[assembly: AssemblyCopyright("© 2026 MH.Kovich · mkovich.com")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace TypeAssist
 {
     internal sealed class App : ApplicationContext
     {
-        const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        public const string Website = "https://mkovich.com";
+        static bool autostart;
 
         readonly Engine engine = new Engine();
         Settings settings;
@@ -32,20 +35,25 @@ namespace TypeAssist
         int lastCheckedGen = -2;
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            autostart = Array.IndexOf(args, Startup.Arg) >= 0;
             bool created;
             using (var mutex = new Mutex(true, "TypeAssist.SingleInstance", out created))
             {
                 if (!created)
                 {
+                    if (autostart) return;
                     MessageBox.Show("TypeAssist is already running (see the icon next to the clock).", "TypeAssist", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
-                Log.W("---- start " + Application.ProductVersion + "  OS " + Environment.OSVersion + "  CLR " + Environment.Version + "  64bit=" + Environment.Is64BitProcess);
+                Log.W("---- start " + Application.ProductVersion + (autostart ? " (at sign-in)" : "") + "  exe " + Application.ExecutablePath + "  OS " + Environment.OSVersion + "  CLR " + Environment.Version + "  64bit=" + Environment.Is64BitProcess);
                 Application.ThreadException += (s, e) => Fatal(e.Exception);
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Fatal(e.ExceptionObject as Exception);
                 Native.MakeDpiAware();
+                Startup.Maintain();
+                // At sign-in, give the taskbar a moment to appear so the tray icon shows up reliably.
+                if (autostart) Thread.Sleep(4000);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 App app;
@@ -109,7 +117,7 @@ namespace TypeAssist
                 popup.BeginInvoke((MethodInvoker)delegate
                 {
                     UpdateTray();
-                    tray.ShowBalloonTip(4000, "TypeAssist is ready",
+                    if (!autostart) tray.ShowBalloonTip(4000, "TypeAssist is ready",
                         "Type in any app. The icon is next to the clock (click ^ if you do not see it).", ToolTipIcon.Info);
                 });
             }
@@ -190,11 +198,13 @@ namespace TypeAssist
                 try { Process.Start("notepad.exe", "\"" + Log.FilePath + "\""); } catch { }
             });
             var miDiag = new ToolStripMenuItem("Diagnostics…", null, delegate { ShowDiagnostics(); });
+            var miAbout = new ToolStripMenuItem("About TypeAssist…", null, delegate { ShowAbout(); });
+            var miSite = new ToolStripMenuItem("Developer: mkovich.com", null, delegate { OpenWebsite(); });
             var miExit = new ToolStripMenuItem("Exit", null, delegate { ExitThread(); });
 
             menu.Items.AddRange(new ToolStripItem[] {
                 miEnabled, new ToolStripSeparator(), miAutocorrect, miSuggest, miLearn, new ToolStripSeparator(),
-                miPauseApp, miStartup, new ToolStripSeparator(), miForget, miFolder, miReload, miLog, miDiag, new ToolStripSeparator(), miExit });
+                miPauseApp, miStartup, new ToolStripSeparator(), miForget, miFolder, miReload, miLog, miDiag, new ToolStripSeparator(), miAbout, miSite, new ToolStripSeparator(), miExit });
             menu.Opening += delegate { UpdateTray(); };
 
             tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
@@ -209,7 +219,7 @@ namespace TypeAssist
             miAutocorrect.Checked = settings.AutoCorrect;
             miSuggest.Checked = settings.Suggestions;
             miLearn.Checked = settings.Learn;
-            miStartup.Checked = IsStartupEnabled();
+            miStartup.Checked = Startup.IsEnabled() && !Startup.DisabledByWindows();
             string app = tracker == null ? "" : tracker.LastApp;
             miPauseApp.Visible = app.Length > 0;
             miPauseApp.Text = "Pause in " + app;
@@ -257,28 +267,37 @@ namespace TypeAssist
             UpdateTray();
         }
 
-        static bool IsStartupEnabled()
-        {
-            try
-            {
-                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey))
-                    return k != null && k.GetValue("TypeAssist") != null;
-            }
-            catch { return false; }
-        }
-
         void ToggleStartup()
         {
-            try
+            if (Startup.IsEnabled() && !Startup.DisabledByWindows())
             {
-                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKey))
-                {
-                    if (k.GetValue("TypeAssist") != null) k.DeleteValue("TypeAssist");
-                    else k.SetValue("TypeAssist", "\"" + Application.ExecutablePath + "\"");
-                }
+                Startup.Disable();
             }
-            catch { }
+            else
+            {
+                string err;
+                if (Startup.Enable(out err))
+                    tray.ShowBalloonTip(2500, "TypeAssist", "Will start automatically when you sign in to Windows.", ToolTipIcon.Info);
+                else
+                    MessageBox.Show("Could not turn on start with Windows:\n" + err, "TypeAssist", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             UpdateTray();
+        }
+
+        static void OpenWebsite()
+        {
+            try { Process.Start(Website); } catch { }
+        }
+
+        static void ShowAbout()
+        {
+            var r = MessageBox.Show(
+                "TypeAssist " + Application.ProductVersion + "\n" +
+                "Autocorrect and word suggestions for Persian and English, in every Windows app.\n\n" +
+                "Developer: mkovich.com\n\n" +
+                "Open the website?",
+                "About TypeAssist", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2);
+            if (r == DialogResult.Yes) OpenWebsite();
         }
 
         void SaveUser()

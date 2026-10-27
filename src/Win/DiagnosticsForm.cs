@@ -16,7 +16,7 @@ namespace TypeAssist
         public DiagnosticsForm(InputTracker tracker)
         {
             this.tracker = tracker;
-            Text = "TypeAssist — Diagnostics";
+            Text = "TypeAssist — Diagnostics  ·  mkovich.com";
             Width = 760; Height = 460;
             StartPosition = FormStartPosition.CenterScreen;
             TopMost = true;

@@ -44,13 +44,15 @@ More detail in [SECURITY.md](SECURITY.md).
 
 ## Download and run
 
-1. Download `TypeAssist-1.3.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
+1. Download `TypeAssist-1.4.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
 2. Run `TypeAssist.exe`. It needs .NET Framework 4.8, which Windows 10 and 11 already include.
 3. **Windows SmartScreen warning:** because the exe isn't digitally signed, Windows may show
    *"Windows protected your PC"*. Click **More info → Run anyway**. This is normal for
    small unsigned open-source apps, not a sign of a problem.
 4. A green **Aa** icon appears next to the clock. It's grey for the first few seconds while the dictionary loads.
-5. To start it with Windows: right-click the icon → **Start with Windows**.
+5. To start it with Windows: right-click the icon → **Start with Windows**. TypeAssist copies itself to
+   `%LocalAppData%\Programs\TypeAssist` and registers that copy, so you can delete or move the downloaded folder.
+   Running a newer version later updates that copy.
 
 > Some antivirus products are suspicious of any app that reads the keyboard, because
 > keyloggers do that too. TypeAssist only reads keys to correct them and has no way
@@ -131,5 +133,5 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Code: [MIT](LICENSE) © 2026 MH.Kovich.
+Code: [MIT](LICENSE) © 2026 MH.Kovich · [mkovich.com](https://mkovich.com).
 Language data comes from wordfreq, codespell, NLTK and Persian-NER under their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
