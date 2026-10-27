@@ -1,0 +1,50 @@
+name: Release
+
+# Push a tag like v1.4.0 to build TypeAssist on Windows, run the tests and publish a GitHub release
+# with TypeAssist-<version>.zip. Release notes come from .github/release-notes/<tag>.md when present.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: cmd
+        run: build.bat
+
+      - name: Test
+        shell: cmd
+        run: tests\run_tests.bat
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $exeVersion = (Get-Item TypeAssist.exe).VersionInfo.ProductVersion
+          if (-not $exeVersion.StartsWith($version)) { throw "Tag $version does not match exe version $exeVersion" }
+          $dir = "dist/TypeAssist"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item TypeAssist.exe, README.md, README.fa.md, LICENSE, THIRD_PARTY_NOTICES.md $dir
+          Compress-Archive -Path $dir -DestinationPath "TypeAssist-$version.zip" -Force
+          "ZIP=TypeAssist-$version.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = ".github/release-notes/$tag.md"
+          if (Test-Path $notes) {
+            gh release create $tag $env:ZIP --title "TypeAssist $($tag.TrimStart('v'))" --notes-file $notes --latest
+          } else {
+            gh release create $tag $env:ZIP --title "TypeAssist $($tag.TrimStart('v'))" --generate-notes --latest
+          }
