@@ -23,7 +23,8 @@ namespace TypeAssist
     /// </summary>
     internal sealed class InputTracker
     {
-        static readonly IntPtr Magic = new IntPtr(0x54415353);   // marks our own injected input ("TASS")
+        internal static readonly IntPtr Magic = new IntPtr(0x54415353);        // marks our own injected input ("TASS")
+        internal static readonly IntPtr ReplayMagic = new IntPtr(0x54415352);  // user keys we held back and pass on ("TASR")
         const uint MsgAccept = Native.WM_APP + 1;
         const uint MsgReset = Native.WM_APP + 2;
 
@@ -177,12 +178,14 @@ namespace TypeAssist
             if (nCode >= 0)
             {
                 int m = wParam.ToInt32();
-                if (m == Native.WM_KEYDOWN || m == Native.WM_SYSKEYDOWN)
+                bool down = m == Native.WM_KEYDOWN || m == Native.WM_SYSKEYDOWN;
+                bool up = m == Native.WM_KEYUP || m == Native.WM_SYSKEYUP;
+                if (down || up)
                 {
                     var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                     bool swallow = false;
-                    try { swallow = OnKeyDown(k); }
-                    catch (Exception ex) { Log.W("key error: " + ex); Reset(false); }
+                    try { swallow = OnHookEvent(k, up); }
+                    catch (Exception ex) { Log.W("key error: " + ex); inFlight = 0; held.Clear(); Reset(false); }
                     if (swallow) return new IntPtr(1);
                 }
             }
@@ -191,7 +194,53 @@ namespace TypeAssist
 
         // ------------------------------------------------------------------ key handling
 
-        internal bool OnKeyDown(Native.KBDLLHOOKSTRUCT k)
+        // ---- keeping the user's keys in order while we retype
+        // When we fix a word we inject Backspaces and new text. Keys the user types in the meantime are already
+        // queued in front of our injected keys, so they would land in the middle of the fix (and our Backspaces
+        // would then delete the wrong letters). Until all our injected keys have gone through, the user's keys
+        // are held back and passed on afterwards, in their original order.
+        struct HeldKey { public Native.KBDLLHOOKSTRUCT K; public bool Up; }
+        readonly List<HeldKey> held = new List<HeldKey>();
+        int inFlight;            // our injected events not yet seen in the hook
+        int inFlightSince;
+
+        internal bool OnHookEvent(Native.KBDLLHOOKSTRUCT k, bool up)
+        {
+            if (k.dwExtraInfo == Magic)
+            {
+                if (inFlight > 0 && --inFlight == 0) FlushHeld();
+                return false;
+            }
+            bool replay = k.dwExtraInfo == ReplayMagic;
+            bool foreign = !replay && (k.flags & Native.LLKHF_INJECTED) != 0;
+            if (inFlight > 0 && !foreign)
+            {
+                held.Add(new HeldKey { K = k, Up = up });
+                // Safety net: if our injected keys never show up (blocked by Windows), stop waiting.
+                if (Environment.TickCount - inFlightSince > 400) { inFlight = 0; FlushHeld(); }
+                return true;
+            }
+            if (up) return false;
+            return OnKeyDown(k, replay);
+        }
+
+        void FlushHeld()
+        {
+            if (held.Count == 0) return;
+            var list = new List<KeyAction>();
+            foreach (var h in held)
+                list.Add(new KeyAction
+                {
+                    Vk = (int)h.K.vkCode, Scan = h.K.scanCode, Up = h.Up, Replay = true,
+                    Extended = (h.K.flags & 0x01) != 0
+                });
+            held.Clear();
+            platform.Send(list);
+        }
+
+        internal bool OnKeyDown(Native.KBDLLHOOKSTRUCT k) { return OnKeyDown(k, false); }
+
+        internal bool OnKeyDown(Native.KBDLLHOOKSTRUCT k, bool replay)
         {
             if (k.dwExtraInfo == Magic) return false;                    // our own typing
             int vk = (int)k.vkCode;
@@ -209,7 +258,7 @@ namespace TypeAssist
                 return true;
             }
             if (!settings.Enabled || Paused) return false;
-            if ((k.flags & Native.LLKHF_INJECTED) != 0) { Reset(false); return false; }   // other software typing
+            if (!replay && (k.flags & Native.LLKHF_INJECTED) != 0) { Reset(false); return false; }   // other software typing
 
             CheckForeground();
             if (appExcluded) return false;
@@ -268,7 +317,15 @@ namespace TypeAssist
                 if (reported == pendingSwitch) pendingSwitch = IntPtr.Zero;
                 else if (++keysSinceSwitch >= 3)
                 {
+                    IntPtr asked = pendingSwitch;
                     pendingSwitch = IntPtr.Zero;
+                    // Either the app ignored the switch (Windows is right, the keyboard did not change), or the app
+                    // switched but Windows misreports it (seen in Telegram). Let the letters typed since decide.
+                    if (!LooksLikeStartOfWord(asked) || LooksLikeStartOfWord(reported))
+                    {
+                        overrideHkl = IntPtr.Zero;
+                        effective = reported;
+                    }
                     if (LastApp.Length > 0 && unreliableApps.Add(LastApp))
                         Log.W("keyboard switching not followed in " + LastApp + ": no more retyping there");
                 }
@@ -533,6 +590,53 @@ namespace TypeAssist
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// The keys of the current word spell a real word in another installed keyboard. Then we may be wrong
+        /// about which keyboard is active (Windows does not always tell), and a "typo fix" would replace a
+        /// correct word with something from the other language. Leave it alone.
+        /// </summary>
+        bool WordInOtherLayout(string typed)
+        {
+            if (segmentBroken) return false;                    // characters came ready-made: they are exact
+            var keys = segment;
+            // At punctuation the punctuation key itself is already recorded: leave it out.
+            if (keys.Count == typed.Length + 1) keys = segment.GetRange(0, typed.Length);
+            if (keys.Count != typed.Length) return true;        // can't line keys up with letters: be safe
+            var layouts = new List<IntPtr>(platform.InstalledLayouts());
+            layouts.Add(BuiltInPersian);
+            foreach (IntPtr h in layouts)
+            {
+                if (h == effective) continue;
+                string r = RenderKeys(keys, h);
+                if (r == null || r == typed || r.Length < 2 || !AllWordChars(r)) continue;
+                Lang rl = TextUtil.DetectLang(r);
+                if (rl == Lang.None) continue;
+                bool common;
+                lock (engine) common = engine.IsCommonWord(TextUtil.Normalize(r, rl), rl);
+                if (common)
+                {
+                    Diag("not corrected: the keys also spell [" + r + "] (" + Name(h) + ")");
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>The keys of the current word, read with hkl, begin a known word.</summary>
+        bool LooksLikeStartOfWord(IntPtr hkl)
+        {
+            string r = Render(hkl);
+            if (string.IsNullOrEmpty(r) || !AllWordChars(r)) return false;
+            Lang l = TextUtil.DetectLang(r);
+            if (l == Lang.None) return false;
+            lock (engine)
+            {
+                var m = engine.Model(l);
+                string key = TextUtil.Normalize(r, l);
+                return m.Contains(key) || m.Complete(key, 1, 20000).Count > 0;
+            }
         }
 
         static string LastWordOf(string t)
@@ -863,6 +967,7 @@ namespace TypeAssist
                 if (settings.AutoCorrect && IsCorrectionTrigger(d))
                 {
                     lock (engine) { fix = engine.TryCorrect(typed, PrevKey(), sentenceStart); }
+                    if (fix != null && WordInOtherLayout(typed)) fix = null;
                 }
                 Diag("word [" + typed + "] lang=" + TextUtil.DetectLang(typed) + " → " + (fix == null ? "no fix (" + engine.Why + ")" : "fixed to [" + fix.Replacement + "]"));
                 if (wordsLogged < 40)
@@ -904,6 +1009,7 @@ namespace TypeAssist
                 Correction fix = null;
                 if (settings.AutoCorrect && IsCorrectionTrigger(d) && typed.Length >= 4)
                     lock (engine) { fix = engine.TryCorrect(typed, null, false); }
+                if (fix != null && WordInOtherLayout(typed)) fix = null;
                 if (fix != null && (fix.Replacement.Length < 1 || char.ToLowerInvariant(fix.Replacement[0]) != char.ToLowerInvariant(typed[0])))
                     fix = null;
                 Diag("first word after click [" + typed + "] → " + (fix == null ? "no fix" : "fixed to [" + fix.Replacement + "]"));
@@ -1149,14 +1255,24 @@ namespace TypeAssist
                 AddVk(list, altVk, false);
                 AddVk(list, Native.VK_MENU_MASK, false); AddVk(list, Native.VK_MENU_MASK, true);
             }
-            platform.Send(list);
+            Inject(list);
+        }
+
+        void Inject(List<KeyAction> list)
+        {
+            int sent = platform.Send(list);
+            if (sent > 0)
+            {
+                inFlight += sent;
+                inFlightSince = Environment.TickCount;
+            }
         }
 
         void SendEnter()
         {
             var list = new List<KeyAction>();
             AddVk(list, Native.VK_RETURN, false); AddVk(list, Native.VK_RETURN, true);
-            platform.Send(list);
+            Inject(list);
         }
 
         static void AddVk(List<KeyAction> list, int vk, bool up)

@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.3] - 2026-10-30
+
+### Fixed
+- **Words disappearing or getting jumbled when typing fast.** When TypeAssist fixed a word, letters typed right
+  after it (before the fix was finished) landed in the middle of the fix, so its Backspaces deleted the wrong
+  letters: words vanished, merged or were left half-typed. Keys typed while a fix is in progress are now held
+  back and passed on right after it, in their original order.
+- **Correct words replaced with nonsense from the other language.** When Windows doesn't report the keyboard
+  language correctly, a correct word could be read in the wrong language and "corrected". A typo fix is now
+  skipped whenever the same keys spell a common word on another installed keyboard.
+- In apps that ignore keyboard switching, TypeAssist now goes back to the keyboard Windows reports instead of
+  keeping its own guess.
+- Logging no longer writes to disk from the keyboard hook, so the hook stays fast.
+
 ## [1.6.2] - 2026-10-29
 
 ### Fixed
@@ -76,6 +90,7 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.6.3]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.3
 [1.6.2]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.2
 [1.6.1]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.1
 [1.6.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.0

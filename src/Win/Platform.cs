@@ -11,6 +11,9 @@ namespace TypeAssist
         public int Vk;
         public char Ch;
         public bool Up;
+        public uint Scan;        // replayed user keys: original scan code
+        public bool Extended;    // replayed user keys: extended-key flag
+        public bool Replay;      // a user key we held back and now pass on
     }
 
     /// <summary>Everything the input tracker needs from Windows (swapped for a fake in tests).</summary>
@@ -30,12 +33,14 @@ namespace TypeAssist
         IntPtr[] InstalledLayouts();
         /// <summary>Ask the foreground app to switch to this keyboard layout (like pressing Alt+Shift).</summary>
         void RequestLayout(IntPtr hkl);
-        void Send(List<KeyAction> actions);
+        /// <summary>Inject the actions; returns how many were accepted.</summary>
+        int Send(List<KeyAction> actions);
     }
 
     internal sealed class WinPlatform : IKeyPlatform
     {
-        static readonly IntPtr Magic = new IntPtr(0x54415353);
+        static readonly IntPtr Magic = InputTracker.Magic;
+        static readonly IntPtr ReplayMagic = InputTracker.ReplayMagic;
         readonly byte[] keyState = new byte[256];
         readonly StringBuilder buf = new StringBuilder(8);
 
@@ -160,19 +165,20 @@ namespace TypeAssist
         public IntPtr PersianLayout { get { RefreshLayouts(); return fa; } }
         public IntPtr EnglishLayout { get { RefreshLayouts(); return en; } }
 
-        public void Send(List<KeyAction> actions)
+        public int Send(List<KeyAction> actions)
         {
             var arr = new Native.INPUT[actions.Count];
             for (int i = 0; i < actions.Count; i++)
             {
                 var a = actions[i];
                 var inp = new Native.INPUT { type = Native.INPUT_KEYBOARD };
-                inp.u.ki.dwExtraInfo = Magic;
+                inp.u.ki.dwExtraInfo = a.Replay ? ReplayMagic : Magic;
                 if (a.Vk != 0)
                 {
                     inp.u.ki.wVk = (ushort)a.Vk;
+                    inp.u.ki.wScan = (ushort)a.Scan;
                     inp.u.ki.dwFlags = a.Up ? Native.KEYEVENTF_KEYUP : 0;
-                    if (a.Vk == Native.VK_RMENU) inp.u.ki.dwFlags |= Native.KEYEVENTF_EXTENDEDKEY;
+                    if (a.Vk == Native.VK_RMENU || a.Extended) inp.u.ki.dwFlags |= Native.KEYEVENTF_EXTENDEDKEY;
                 }
                 else
                 {
@@ -181,7 +187,7 @@ namespace TypeAssist
                 }
                 arr[i] = inp;
             }
-            Native.SendInput((uint)arr.Length, arr, Marshal.SizeOf(typeof(Native.INPUT)));
+            return (int)Native.SendInput((uint)arr.Length, arr, Marshal.SizeOf(typeof(Native.INPUT)));
         }
     }
 }

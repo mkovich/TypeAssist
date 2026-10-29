@@ -85,9 +85,28 @@ namespace TypeAssist.Tests
             return shift ? r.ToUpperInvariant() : r;
         }
 
-        public void Send(List<KeyAction> actions)
+        // Queue mode: injected keys go to the end of the input queue, like real Windows, and only reach the
+        // "app" (Text) when the hook lets them through. Used to test fast typing.
+        public bool QueueMode;
+        public readonly Queue<QEvent> Pending = new Queue<QEvent>();
+        public struct QEvent { public Native.KBDLLHOOKSTRUCT K; public bool Up; public char Ch; }
+
+        public int Send(List<KeyAction> actions)
         {
             Injections++;
+            if (QueueMode)
+            {
+                foreach (var a in actions)
+                {
+                    var k = new Native.KBDLLHOOKSTRUCT
+                    {
+                        vkCode = (uint)a.Vk, scanCode = a.Vk == 0 ? a.Ch : a.Scan,
+                        flags = Native.LLKHF_INJECTED, dwExtraInfo = a.Replay ? InputTracker.ReplayMagic : InputTracker.Magic
+                    };
+                    Pending.Enqueue(new QEvent { K = k, Up = a.Up, Ch = a.Ch });
+                }
+                return actions.Count;
+            }
             foreach (var a in actions)
             {
                 if (a.Up) continue;
@@ -95,6 +114,7 @@ namespace TypeAssist.Tests
                 else if (a.Vk == Native.VK_RETURN) Text.Append('\n');
                 else if (a.Vk == 0) Text.Append(a.Ch);
             }
+            return 0;   // applied directly: nothing will come back through the hook
         }
     }
 
@@ -139,6 +159,38 @@ namespace TypeAssist.Tests
                 var k = new Native.KBDLLHOOKSTRUCT { vkCode = FakePlatform.VkFor(q), scanCode = FakePlatform.ScanFor(q) };
                 bool swallowed = tr.OnKeyDown(k);
                 if (!swallowed) pf.Text.Append(FakePlatform.Map(q, pf.Real));
+            }
+        }
+
+        /// <summary>Queue every key of text at once (a very fast typist), then let the hook and the "app" process them.</summary>
+        static void FastKeys(string text)
+        {
+            foreach (char ch in text)
+            {
+                char q = ch == ' ' ? ' ' : FakePlatform.QwertyFor(ch);
+                var k = ch == ' ' ? new Native.KBDLLHOOKSTRUCT { vkCode = 0x20 }
+                                  : new Native.KBDLLHOOKSTRUCT { vkCode = FakePlatform.VkFor(q), scanCode = FakePlatform.ScanFor(q) };
+                pf.Pending.Enqueue(new FakePlatform.QEvent { K = k });
+                k.flags = 0x80;
+                pf.Pending.Enqueue(new FakePlatform.QEvent { K = k, Up = true });
+            }
+            Pump();
+        }
+
+        static void Pump()
+        {
+            int guard = 0;
+            while (pf.Pending.Count > 0 && guard++ < 100000)
+            {
+                var e = pf.Pending.Dequeue();
+                bool swallowed = tr.OnHookEvent(e.K, e.Up);
+                if (swallowed || e.Up) continue;
+                uint vk = e.K.vkCode;
+                if (vk == Native.VK_BACK) { if (pf.Text.Length > 0) pf.Text.Length--; }
+                else if (vk == Native.VK_RETURN) pf.Text.Append('\n');
+                else if (vk == 0) pf.Text.Append(e.Ch);
+                else if (vk == 0x20) pf.Text.Append(' ');
+                else pf.Text.Append(FakePlatform.Map(FakePlatform.QwertyFromVk(vk), pf.Real));
             }
         }
 
@@ -383,6 +435,24 @@ namespace TypeAssist.Tests
             Keys("hello there o,fd ");
             Check("app ignoring the switch: no more retyping there", "خوبی hello there o,fd ");
             pf.IgnoresRequests = false; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // very fast typing: keys typed while a fix is being injected must not end up inside it
+            Fresh("notepad"); pf.QueueMode = true; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            FastKeys("we think thier house is wierd today ");
+            Check("fast typing with fixes: nothing lost or shuffled", "we think their house is weird today ");
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            FastKeys("sghljd o,fd ");
+            Check("fast typing with a keyboard switch", "سلامتی خوبی ");
+            Fresh("notepad"); pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;
+            FastKeys("من میخواهم وجدود بروم ");
+            Check("fast persian typing with fixes", "من می‌خواهم وجود بروم ");
+            pf.QueueMode = false; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // the keys of a word spell a word in the other keyboard: never "corrected"
+            Fresh("notepad"); pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.En;   // Windows wrong, user types English
+            Keys("hello there ");
+            Check("english typed while Windows says persian: untouched", "hello there ");
+            pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
 
             // setting off: nothing retyped
             settings.AutoSwitchLayout = false;

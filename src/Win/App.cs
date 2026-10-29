@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("TypeAssist")]
 [assembly: AssemblyCompany("mkovich.com")]
 [assembly: AssemblyCopyright("© 2026 MH.Kovich · mkovich.com")]
-[assembly: AssemblyVersion("1.6.2.0")]
-[assembly: AssemblyFileVersion("1.6.2.0")]
+[assembly: AssemblyVersion("1.6.3.0")]
+[assembly: AssemblyFileVersion("1.6.3.0")]
 
 namespace TypeAssist
 {
@@ -319,6 +319,7 @@ namespace TypeAssist
         protected override void ExitThreadCore()
         {
             tracker.Stop();
+            Log.Flush();
             string[] snap = null;
             lock (engine) { if (engine.Dirty) snap = engine.SnapshotUser(); }
             if (snap != null) try { Engine.WriteUser(Settings.Dir, snap); } catch { }

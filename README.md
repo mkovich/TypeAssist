@@ -44,7 +44,7 @@ More detail in [SECURITY.md](SECURITY.md).
 
 ## Download and run
 
-1. Download `TypeAssist-1.6.2.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
+1. Download `TypeAssist-1.6.3.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
 2. Run `TypeAssist.exe`. It needs .NET Framework 4.8, which Windows 10 and 11 already include.
 3. **Windows SmartScreen warning:** because the exe isn't digitally signed, Windows may show
    *"Windows protected your PC"*. Click **More info → Run anyway**. This is normal for
