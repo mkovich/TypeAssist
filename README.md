@@ -44,7 +44,7 @@ More detail in [SECURITY.md](SECURITY.md).
 
 ## Download and run
 
-1. Download `TypeAssist-1.6.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
+1. Download `TypeAssist-1.6.1.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
 2. Run `TypeAssist.exe`. It needs .NET Framework 4.8, which Windows 10 and 11 already include.
 3. **Windows SmartScreen warning:** because the exe isn't digitally signed, Windows may show
    *"Windows protected your PC"*. Click **More info → Run anyway**. This is normal for
@@ -80,8 +80,10 @@ in the right language and switches the keyboard for you, from the very first wor
 was too rare to be sure of on its own, it's fixed as soon as the next word gives it away, whether
 TypeAssist switches the keyboard or you do (`sghl o,fd` → `سلام خوبی`). Press
 **Backspace** right away to undo: the word and the keyboard go back, and that word is never
-switched again. It only acts when what you typed isn't a word and the other reading is a common
-word, so names, slang and short words like `ok` are left alone. Turn it off from the tray menu →
+switched again. It only acts when what you typed is clear gibberish and the other reading is a
+common word. Anything that means something in both languages (`بعد` / `fun`), names, slang and
+short words like `ok` are left alone. In apps that ignore keyboard switching, or that deliver
+finished characters instead of keys, it stops retyping altogether. Turn it off from the tray menu →
 **Fix wrong keyboard language**.
 
 ## Why it doesn't get in the way

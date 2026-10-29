@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-10-29
+
+### Fixed
+- Words that mean something in both languages were sometimes switched to the other language (`بعد` became
+  `fun`). A word is now only retyped when what was typed is clear gibberish: no rare words, no likely typos.
+- Undoing a keyboard-language fix with Backspace now blocks that switch for good, in both directions.
+- In apps that don't follow keyboard switching, or that deliver finished characters (VK_PACKET) instead of keys,
+  TypeAssist no longer retypes words, because it can't be sure what is on screen there.
+
 ## [1.6.0] - 2026-10-29
 
 ### Added
@@ -59,6 +68,7 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.6.1]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.1
 [1.6.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.0
 [1.5.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.5.0
 [1.4.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.4.0

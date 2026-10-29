@@ -255,10 +255,37 @@ namespace TypeAssist
             }
 
             IntPtr reported = platform.ReportedLayout();
-            if (reported != lastReported) { lastReported = reported; overrideHkl = IntPtr.Zero; }
+            if (reported != lastReported)
+            {
+                // Windows reports keyboard changes for this app: it is not one of the misreporting ones.
+                lastReported = reported; overrideHkl = IntPtr.Zero; pendingSwitch = IntPtr.Zero;
+            }
             effective = overrideHkl != IntPtr.Zero ? overrideHkl : reported;
-            string text = TranslateWith(effective, k.vkCode, k.scanCode, shift);
-            if (text != null && text.Length == 1 && text[0] > ' ' && text[0] != '\u00A0')
+            if (pendingSwitch != IntPtr.Zero)
+            {
+                // Did the app follow our keyboard switch? If not, Windows can't tell us its real keyboard and we
+                // must not retype anything in it: our idea of what is on screen may be wrong.
+                if (reported == pendingSwitch) pendingSwitch = IntPtr.Zero;
+                else if (++keysSinceSwitch >= 3)
+                {
+                    pendingSwitch = IntPtr.Zero;
+                    if (LastApp.Length > 0 && unreliableApps.Add(LastApp))
+                        Log.W("keyboard switching not followed in " + LastApp + ": no more retyping there");
+                }
+            }
+            string text;
+            bool packet = k.vkCode == VK_PACKET;
+            if (packet)
+            {
+                // Some keyboards and apps deliver the finished character instead of a key. The character is
+                // exact, but there are no keys to read in another language, so no keyboard-language guessing.
+                text = k.scanCode > 0 && k.scanCode < 0xFFFF ? ((char)k.scanCode).ToString() : null;
+                segmentBroken = true;
+                if (LastApp.Length > 0 && unreliableApps.Add(LastApp))
+                    Log.W("app delivers characters, not keys: " + LastApp + ": no keyboard-language fixes there");
+            }
+            else text = TranslateWith(effective, k.vkCode, k.scanCode, shift);
+            if (!packet && text != null && text.Length == 1 && text[0] > ' ' && text[0] != '\u00A0')
             {
                 if (segment.Count == 0)
                 {
@@ -343,6 +370,16 @@ namespace TypeAssist
         // while typing Persian). We remember the keys of the current word and, at each space, read them with
         // both the Persian and the English layout; if the other reading is clearly a real word, we switch.
         struct KeyRec { public uint Vk, Scan; public bool Shift; }
+        const uint VK_PACKET = 0xE7;
+        bool segmentBroken;                 // a key of this word could not be recorded
+        IntPtr pendingSwitch;               // keyboard we asked the app to switch to
+        int keysSinceSwitch;
+        readonly HashSet<string> unreliableApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool RetypeAllowed()
+        {
+            return settings.AutoSwitchLayout && !unreliableApps.Contains(LastApp);
+        }
         readonly List<KeyRec> segment = new List<KeyRec>();
         bool segAtBoundary, segAfterReset, segFirstInField, segSentence;
         string segPrev, segPrev2;
@@ -398,7 +435,7 @@ namespace TypeAssist
             return platform.Translate(vk, scan, shift, capsOn, hkl);
         }
 
-        string Render(IntPtr hkl) { return RenderKeys(segment, hkl); }
+        string Render(IntPtr hkl) { return segmentBroken ? null : RenderKeys(segment, hkl); }
 
         string RenderKeys(List<KeyRec> keys, IntPtr hkl)
         {
@@ -474,26 +511,6 @@ namespace TypeAssist
         /// common word. Retyping is safe even when Windows misreported the layout and the screen already shows the
         /// other reading, because the same characters are written back.
         /// </summary>
-        /// <summary>
-        /// mine is in the word list but rare (word-list noise such as هدفخ, fi, hc), and theirs is a common word
-        /// at least 50 times more frequent: mine was most likely theirs typed on the wrong keyboard.
-        /// </summary>
-        bool RareLosesTo(string mine, string theirs)
-        {
-            if (!AllWordChars(mine) || !AllWordChars(theirs)) return false;
-            Lang ml = TextUtil.DetectLang(mine), tl = TextUtil.DetectLang(theirs);
-            if (ml == Lang.None || tl == Lang.None) return false;
-            lock (engine)
-            {
-                int mw = engine.WordWeight(TextUtil.Normalize(mine, ml), ml);
-                if (mw < 0 || mw >= (mine.Length <= 2 ? 50000 : 2000)) return false;
-                string tk = TextUtil.Normalize(theirs, tl);
-                int tw = engine.WordWeight(tk, tl);
-                if (!engine.IsCommonWord(tk, tl)) return false;
-                return tw < 0 || tw >= 50.0 * Math.Max(1, mw);
-            }
-        }
-
         static string LastWordOf(string t)
         {
             int i = t.LastIndexOf(' ');
@@ -519,9 +536,7 @@ namespace TypeAssist
                 if (h.Screen.Length <= 3) { bool caps = false; foreach (char ch in h.Screen) if (char.IsUpper(ch)) caps = true; if (caps) break; }
                 string again = RenderKeys(h.Keys, effective);
                 if (again == null || again == h.Screen || Plausibility(again) != 3) break;
-                int was = TokensPlausibility(h.Screen);
-                if (was == 2 && again.Length < 4) break;
-                if (was == 3 && !RareLosesTo(h.Screen, again)) break;
+                if (TokensPlausibility(h.Screen) > 1) break;   // only clear gibberish is retyped
                 if (again.Length <= 3)
                 {
                     // Short words are easily something else: only very common ones count.
@@ -545,7 +560,12 @@ namespace TypeAssist
             string curOriginal = curTyped && lastFix != null ? lastFix.Original : cur;
             var reject = new List<string>();
             foreach (var h in fix) reject.Add(h.Screen);
-            if (curWasSwitched && lastFix != null) reject.Add(lastFix.Original);
+            reject.AddRange(newTexts);
+            if (curWasSwitched && lastFix != null)
+            {
+                if (lastFix.RejectWords != null) reject.AddRange(lastFix.RejectWords);
+                else reject.Add(lastFix.Original);
+            }
             lastFix = new Pending
             {
                 Original = oldJoined + curOriginal,
@@ -565,6 +585,8 @@ namespace TypeAssist
         void SwitchKeyboard(IntPtr target)
         {
             platform.RequestLayout(target);
+            pendingSwitch = target;
+            keysSinceSwitch = 0;
             effective = target;
             IntPtr now = platform.ReportedLayout();
             lastReported = now;
@@ -575,7 +597,7 @@ namespace TypeAssist
 
         IntPtr LayoutFixTarget()
         {
-            if (!settings.AutoSwitchLayout || switchText == null) return IntPtr.Zero;
+            if (!RetypeAllowed() || switchText == null) return IntPtr.Zero;
             return switchTo == BuiltInPersian ? platform.PersianLayout : switchTo;
         }
 
@@ -586,22 +608,12 @@ namespace TypeAssist
             string mine = Render(effective);
             if (mine == null) return 0;
             int a = TokensPlausibility(mine);
-            // a == 2: looks like a typo of a real word in this language. Only a common longer word in the
-            // other language beats that (هدفخ is a typo of هدف, but it is also "into" on the wrong keyboard).
+            // Only clear gibberish counts: anything that is a word, a rare word or a likely typo in the language
+            // we read it in is left alone, even if the other reading is a word too (بعد / fun, مثلا / legh).
+            if (a >= 2) return 0;
             if (mine.Length <= 3)
                 foreach (char ch in mine)
                     if (char.IsUpper(ch)) return 0;   // a capital letter was typed on purpose (Di, OK, US): leave it
-            // A "known" reading can still be noise in the word list (fi, hc, nv are listed English words, but
-            // they are also به، از، در typed on the wrong keyboard). Such a rare reading loses to a far more common
-            // word in the other language.
-            int mineWeight = -1;
-            if (a == 3 && AllWordChars(mine))
-            {
-                Lang ml = TextUtil.DetectLang(mine);
-                if (ml != Lang.None) lock (engine) mineWeight = engine.WordWeight(TextUtil.Normalize(mine, ml), ml);
-                if (mineWeight < 0 || mineWeight >= (mine.Length <= 2 ? 50000 : 2000)) return 0;
-            }
-            else if (a >= 3) return 0;
             IntPtr bestH = IntPtr.Zero;
             string bestText = null;
             foreach (IntPtr h in OtherLayouts())
@@ -612,22 +624,13 @@ namespace TypeAssist
                 // Only a common word counts as evidence: a wrong guess here changes how every following
                 // key is read, so rare words, names and slang never trigger a switch.
                 Lang tl = TextUtil.DetectLang(theirs);
-                int w;
                 bool common;
-                lock (engine)
-                {
-                    string tk = TextUtil.Normalize(theirs, tl);
-                    w = engine.WordWeight(tk, tl);
-                    common = engine.IsCommonWord(tk, tl);
-                }
+                lock (engine) common = engine.IsCommonWord(TextUtil.Normalize(theirs, tl), tl);
                 if (!common) continue;
-                if (a == 2 && theirs.Length < 4) continue;
-                if (a == 3 && w >= 0 && w < 50.0 * Math.Max(1, mineWeight)) continue;
                 bestH = h; bestText = theirs;
                 if (h != BuiltInPersian) break;
             }
             if (bestText == null) return 0;
-            if (a >= 2) a = 1;   // treat the rare or misspelt reading as not a word from here on
             switchFrom = effective;
             switchScreen = mine;
             switchMineScore = a;
@@ -916,12 +919,14 @@ namespace TypeAssist
                 {
                     Type(segLen, switchText + d, false);
                     swallow = true;
-                    lastFix = new Pending { Original = switchScreen, Replacement = switchText, Delimiter = d, Tick = Environment.TickCount };
+                    lastFix = new Pending { Original = switchScreen, Replacement = switchText, Delimiter = d, Tick = Environment.TickCount,
+                                            RejectWords = new List<string> { switchScreen, switchText } };
                     if (finished == null && (wordTrusted || semiTrusted)) finished = switchText;
                 }
                 else if (lastFix != null)
                 {
                     lastFix.Original = switchScreen;
+                    lastFix.RejectWords = new List<string> { switchScreen, switchText, lastFix.Replacement };
                 }
                 if (lastFix != null)
                     lastFix.PrevLayout = switchFrom == BuiltInPersian ? platform.PersianLayout : switchFrom;
@@ -934,7 +939,7 @@ namespace TypeAssist
             {
                 bool beliefOnly = switchText != null && layoutFix == IntPtr.Zero;
                 string cur = swallow ? (lastFix != null ? lastFix.Replacement : null) : Render(effective);
-                if (cur != null && !beliefOnly && settings.AutoSwitchLayout && history.Count > 0)
+                if (cur != null && !beliefOnly && RetypeAllowed() && history.Count > 0)
                 {
                     if (FixEarlierWords(cur, d, swallow, layoutFix != IntPtr.Zero)) swallow = true;
                     cur = lastFix != null && swallow ? LastWordOf(lastFix.Replacement) : cur;
@@ -957,7 +962,7 @@ namespace TypeAssist
 
         void AfterBoundary(string d, string finished)
         {
-            if (d == " " || d == "\n" || d == "\t" || d == "\u00A0") segment.Clear();
+            if (d == " " || d == "\n" || d == "\t" || d == "\u00A0") { segment.Clear(); segmentBroken = false; }
             afterReset = false;
             semiTrusted = false;
             word.Length = 0;
@@ -989,6 +994,8 @@ namespace TypeAssist
             afterReset = true;
             semiTrusted = false;
             segment.Clear();
+            segmentBroken = false;
+            pendingSwitch = IntPtr.Zero;
             history.Clear();
             if (!keepPopup && shown.Count > 0) { shown = new List<Suggestion>(); Publish(); }
             else if (!keepPopup) Publish();

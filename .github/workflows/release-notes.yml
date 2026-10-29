@@ -1,0 +1,38 @@
+name: Update release notes
+
+# Replaces the notes of an existing release with .github/release-notes/<tag>.md.
+# Run it from the Actions tab ("Run workflow"); leave the tag empty to update every release that has a notes file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, e.g. v1.6.0 (empty = all releases with a notes file)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -e
+          if [ -n "$TAG" ]; then tags="$TAG"; else tags=$(ls .github/release-notes | sed 's/\.md$//'); fi
+          for t in $tags; do
+            f=".github/release-notes/$t.md"
+            if [ ! -f "$f" ]; then echo "no notes file for $t"; exit 1; fi
+            if gh release view "$t" >/dev/null 2>&1; then
+              gh release edit "$t" --notes-file "$f"
+              echo "updated $t"
+            else
+              echo "skipped $t (no such release)"
+            fi
+          done

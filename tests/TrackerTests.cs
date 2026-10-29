@@ -58,9 +58,11 @@ namespace TypeAssist.Tests
         public IntPtr[] InstalledLayouts() { return Layouts; }
         public bool Misreports;      // app ignores layout requests and Windows reports the wrong layout
         public int Requests;
+        public bool IgnoresRequests;   // app that does not react to keyboard switching at all
         public void RequestLayout(IntPtr hkl)
         {
             Requests++;
+            if (IgnoresRequests) return;
             Real = hkl;
             if (!Misreports) Reported = hkl;
         }
@@ -337,6 +339,28 @@ namespace TypeAssist.Tests
             Check("after one use: suggests the user's own next word (" + sug + ")", sug == "Hormuz" ? "see you at the " : "suggested " + sug);
             Type("\t");
             Check("…Tab accepts it, with the user's capital", "see you at the Hormuz ");
+
+            // words that mean something in both languages are never switched (بعد = fun, مثلا = legh)
+            Fresh("notepad"); pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa; pf.Requests = 0;
+            Keys("بعد مثلا ");
+            Check("persian words that are also english keys stay (requests=" + pf.Requests + ")", pf.Requests == 0 ? "بعد مثلا " : "switched: " + pf.Text);
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En; pf.Requests = 0;
+            Keys("fun hi ");
+            Check("english words that are also persian keys stay", pf.Requests == 0 ? "fun hi " : "switched: " + pf.Text);
+            // undo blocks the switch for good, in both directions
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("sghl ");
+            Keys("\b");
+            Check("undo", "sghl ");
+            Keys("sghl ");
+            Check("undone word is not switched again", "sghl sghl ");
+            pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            // an app that ignores keyboard switching gets no retyping after the first attempt
+            Fresh("weirdapp"); pf.IgnoresRequests = true; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("o,fd ");                        // خوبی typed on English: retyped once, switch requested but ignored
+            Keys("hello there o,fd ");
+            Check("app ignoring the switch: no more retyping there", "خوبی hello there o,fd ");
+            pf.IgnoresRequests = false; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
 
             // setting off: nothing retyped
             settings.AutoSwitchLayout = false;
