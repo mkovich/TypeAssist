@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-10-29
+
+### Added
+- **Wrong keyboard language fix.** A word typed with the keyboard on the wrong language (`sghl` → `سلام`,
+  `اثممخ` → `hello`) is retyped in the right language when you press Space, and the keyboard is switched for
+  you, from the first word. Backspace right after undoes both. On by default; tray menu →
+  **Fix wrong keyboard language**, or `auto_switch_layout` in `settings.ini`.
+  In a simulation over 73,000 correctly typed English and Persian words it switched 2 by mistake, and it fixed
+  92% of common words typed on the wrong keyboard.
+
+### Changed
+- The keyboard-layout cross-check now needs a common word as evidence before it changes how keys are read,
+  so rare words and names can no longer flip it.
+
 ## [1.4.0] - 2026-10-27
 
 ### Fixed
@@ -29,5 +43,6 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.5.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.5.0
 [1.4.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.4.0
 [1.3.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.3.0

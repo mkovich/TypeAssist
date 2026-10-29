@@ -44,7 +44,7 @@ More detail in [SECURITY.md](SECURITY.md).
 
 ## Download and run
 
-1. Download `TypeAssist-1.4.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
+1. Download `TypeAssist-1.5.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
 2. Run `TypeAssist.exe`. It needs .NET Framework 4.8, which Windows 10 and 11 already include.
 3. **Windows SmartScreen warning:** because the exe isn't digitally signed, Windows may show
    *"Windows protected your PC"*. Click **More info → Run anyway**. This is normal for
@@ -72,6 +72,16 @@ More detail in [SECURITY.md](SECURITY.md).
 When you accept a suggestion, a space is added for you. If you then type `.` or `,`,
 that extra space is removed.
 
+### Wrong keyboard language
+
+Typed Persian while the keyboard was on English (`sghl` instead of `سلام`), or English on the
+Persian keyboard (`اثممخ` instead of `hello`)? When you press Space, TypeAssist retypes the word
+in the right language and switches the keyboard for you, from the very first word. Press
+**Backspace** right away to undo: the word and the keyboard go back, and that word is never
+switched again. It only acts when what you typed isn't a word and the other reading is a common
+word, so names, slang and short words like `ok` are left alone. Turn it off from the tray menu →
+**Fix wrong keyboard language**.
+
 ## Why it doesn't get in the way
 
 - It only corrects when it's nearly certain. If two words are likely (e.g. «ضرف»: ظرف or صرف?) it only suggests.
@@ -97,6 +107,7 @@ Tray menu → **Open settings folder**, edit `settings.ini`, then **Reload setti
 | `zwnj_fix` | Add the half-space in می‌/نمی‌ and ها/های |
 | `accept_with_tab` | Set to `no` if you need Tab for something else (Alt+1..3 still work) |
 | `smart_space` | Add a space after accepting a suggestion |
+| `auto_switch_layout` | Fix words typed with the wrong keyboard language and switch the keyboard |
 | `popup_delay_ms` | Delay before the suggestion bar appears (default 60) |
 | `excluded_apps` | Process names without `.exe`, comma-separated |
 

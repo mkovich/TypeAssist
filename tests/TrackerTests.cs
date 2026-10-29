@@ -56,15 +56,24 @@ namespace TypeAssist.Tests
         public IntPtr EnglishLayout { get { return En; } }
         public IntPtr[] Layouts = { En, Fa };
         public IntPtr[] InstalledLayouts() { return Layouts; }
+        public bool Misreports;      // app ignores layout requests and Windows reports the wrong layout
+        public int Requests;
+        public void RequestLayout(IntPtr hkl)
+        {
+            Requests++;
+            Real = hkl;
+            if (!Misreports) Reported = hkl;
+        }
         public bool IsDown(int vk) { return Down.Contains(vk); }
         public IntPtr Foreground() { return new IntPtr(Process.GetHashCode()); }
         public string ProcessName(IntPtr h) { return Process; }
         public bool IsFullScreen(IntPtr h) { return false; }
         public string Translate(uint vk, uint scan, bool shift, bool caps, IntPtr hkl)
         {
-            if (vk == 0x41) return NextChar;                       // old-style test key: the char is given
+            if (vk == 0x07) return NextChar;                       // old-style test key (unassigned vk): the char is given
             if (vk == 0x20) return " ";
-            return Map(QwertyFromVk(vk), hkl);
+            string r = Map(QwertyFromVk(vk), hkl);
+            return shift ? r.ToUpperInvariant() : r;
         }
 
         public void Send(List<KeyAction> actions)
@@ -106,7 +115,7 @@ namespace TypeAssist.Tests
                 if (c == '\n') Key(Native.VK_RETURN, "\r");
                 else if (c == '\b') Key(Native.VK_BACK, "\b");
                 else if (c == '\t') Key(Native.VK_TAB, "\t");
-                else Key(0x41, c.ToString());   // vk does not matter: the fake layout returns the char
+                else Key(0x07, c.ToString());   // unassigned vk: the fake layout returns the given char
             }
         }
 
@@ -241,7 +250,7 @@ namespace TypeAssist.Tests
             Check("unsure word: alternatives offered (" + offered + ") and Tab replaces it", "see the " + pick + " ");
 
             // Windows reports English but the app really types Persian (seen with Telegram)
-            Fresh("telegram"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.Fa;
+            Fresh("telegram"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.Fa; pf.Misreports = true;
             Keys("سلام وجدود دارد ");
             Check("wrong layout reported: persian still fixed", "سلام وجود دارد ");
             Keys("کتابها ");
@@ -250,6 +259,7 @@ namespace TypeAssist.Tests
             pf.Real = FakePlatform.En;
             Keys("hello wierd ");
             Check("switching back to english is noticed", "سلام وجود دارد کتاب‌ها hello weird ");
+            pf.Misreports = false;
             // Genuine English with punctuation must never be read as Persian
             Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
             Keys("hello,world is, it wierd ");
@@ -263,9 +273,37 @@ namespace TypeAssist.Tests
             Keys("سلام وجدود دارد ");
             Check("no persian layout listed: built-in table", "سلام وجود دارد ");
             pf.Real = FakePlatform.En;
-            Keys("helo there ");
+            Keys("hello there ");
             Check("…and back to english", "سلام وجود دارد hello there ");
             pf.Layouts = new[] { FakePlatform.En, FakePlatform.Fa };
+            pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // ---- wrong keyboard language: typed with the keyboard on English but meant Persian, and back
+            settings.AutoSwitchLayout = true;
+            pf.Misreports = false;
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En; pf.Requests = 0;
+            Keys("sghl ");        // سلام typed on the English keyboard
+            Check("english keyboard, persian word: retyped from the first word", "سلام ");
+            Check("…and the keyboard was switched (" + pf.Requests + " request)", pf.Real == FakePlatform.Fa ? "سلام " : "keyboard not switched");
+            Keys("ofvd ");        // خبر typed now really in Persian
+            Check("…next word is typed normally in persian", "سلام خبری ");
+            pf.Text.Length = 0; Fresh("notepad"); pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;
+            Keys("اثممخ ");       // hello typed on the Persian keyboard
+            Check("persian keyboard, english word: retyped", "hello ");
+            Check("…keyboard back on english", pf.Real == FakePlatform.En ? "hello " : "keyboard not switched");
+            Keys("\b");
+            Check("backspace undoes the switch", "اثممخ ");
+            Check("…and puts the keyboard back", pf.Real == FakePlatform.Fa ? "اثممخ " : "keyboard not restored");
+            // short or uncommon words must not trigger a switch
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En; pf.Requests = 0;
+            Keys("ok lol brb asap ");
+            Check("short english words stay english (requests=" + pf.Requests + ")", pf.Requests == 0 ? "ok lol brb asap " : "switched: " + pf.Text);
+            // setting off: nothing retyped
+            settings.AutoSwitchLayout = false;
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("sghl ");
+            Check("setting off: left alone", "sghl ");
+            settings.AutoSwitchLayout = true;
             pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
 
             Console.WriteLine("injections: " + pf.Injections + (fails == 0 ? "   TRACKER OK" : "   " + fails + " TRACKER FAILED"));

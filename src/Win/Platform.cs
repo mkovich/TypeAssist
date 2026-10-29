@@ -28,6 +28,8 @@ namespace TypeAssist
         IntPtr PersianLayout { get; }
         IntPtr EnglishLayout { get; }
         IntPtr[] InstalledLayouts();
+        /// <summary>Ask the foreground app to switch to this keyboard layout (like pressing Alt+Shift).</summary>
+        void RequestLayout(IntPtr hkl);
         void Send(List<KeyAction> actions);
     }
 
@@ -119,6 +121,14 @@ namespace TypeAssist
         IntPtr fa, en;
         IntPtr[] all = new IntPtr[0];
         public IntPtr[] InstalledLayouts() { RefreshLayouts(); return all; }
+
+        public void RequestLayout(IntPtr hkl)
+        {
+            if (hkl == IntPtr.Zero) return;
+            IntPtr fg = Native.GetForegroundWindow();
+            bool ok = Native.PostMessage(fg, Native.WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
+            Log.W("keyboard switch requested: " + Describe(hkl) + (ok ? "" : " (failed)"));
+        }
         int layoutsTick = int.MinValue;
 
         void RefreshLayouts()

@@ -14,6 +14,7 @@ namespace TypeAssist
         public bool ZwnjFix = true;
         public bool Learn = true;
         public bool AcceptWithTab = true;
+        public bool AutoSwitchLayout = true;    // fix words typed with the wrong keyboard language
         public bool SmartSpace = true;          // add a space after an accepted suggestion
         public int PopupDelayMs = 60;
         public HashSet<string> ExcludedApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +58,7 @@ namespace TypeAssist
                         case "zwnj_fix": s.ZwnjFix = Bool(v, s.ZwnjFix); break;
                         case "learn": s.Learn = Bool(v, s.Learn); break;
                         case "accept_with_tab": s.AcceptWithTab = Bool(v, s.AcceptWithTab); break;
+                        case "auto_switch_layout": s.AutoSwitchLayout = Bool(v, s.AutoSwitchLayout); break;
                         case "smart_space": s.SmartSpace = Bool(v, s.SmartSpace); break;
                         case "popup_delay_ms": int d; if (int.TryParse(v, out d)) s.PopupDelayMs = Math.Max(0, Math.Min(1000, d)); break;
                         case "excluded_apps":
@@ -98,6 +100,8 @@ namespace TypeAssist
                 sb.AppendLine("learn=" + Yes(Learn));
                 sb.AppendLine("# Tab accepts the highlighted suggestion while the suggestion bar is visible (Alt+1..3 always works)");
                 sb.AppendLine("accept_with_tab=" + Yes(AcceptWithTab));
+                sb.AppendLine("# Word typed with the wrong keyboard language (sghl -> سلام, اثممخ -> hello): retype it and switch the keyboard");
+                sb.AppendLine("auto_switch_layout=" + Yes(AutoSwitchLayout));
                 sb.AppendLine("smart_space=" + Yes(SmartSpace));
                 sb.AppendLine("popup_delay_ms=" + PopupDelayMs);
                 sb.AppendLine("# Process names (without .exe) where TypeAssist stays silent");

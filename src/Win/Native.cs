@@ -143,6 +143,9 @@ namespace TypeAssist
         [DllImport("user32.dll")]
         public static extern int GetKeyboardLayoutList(int n, [Out] IntPtr[] list);
         [DllImport("user32.dll")]
+        public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+        public const uint WM_INPUTLANGCHANGEREQUEST = 0x0050;
+        [DllImport("user32.dll")]
         public static extern int ToUnicodeEx(uint vk, uint scan, byte[] state, [Out] StringBuilder buf, int bufSize, uint flags, IntPtr hkl);
 
         [DllImport("user32.dll")]

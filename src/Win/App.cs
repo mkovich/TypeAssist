@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("TypeAssist")]
 [assembly: AssemblyCompany("mkovich.com")]
 [assembly: AssemblyCopyright("© 2026 MH.Kovich · mkovich.com")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
 
 namespace TypeAssist
 {
@@ -28,7 +28,7 @@ namespace TypeAssist
         InputTracker tracker;
         PopupForm popup;
         NotifyIcon tray;
-        ToolStripMenuItem miEnabled, miAutocorrect, miSuggest, miLearn, miStartup, miPauseApp;
+        ToolStripMenuItem miEnabled, miAutocorrect, miSuggest, miLearn, miStartup, miPauseApp, miLayout;
         readonly System.Windows.Forms.Timer focusTimer = new System.Windows.Forms.Timer();
         readonly System.Windows.Forms.Timer saveTimer = new System.Windows.Forms.Timer();
         Icon iconOn, iconOff;
@@ -175,6 +175,10 @@ namespace TypeAssist
             {
                 settings.Suggestions = !settings.Suggestions; settings.Save(); UpdateTray(); popup.HidePopup();
             });
+            miLayout = new ToolStripMenuItem("Fix wrong keyboard language", null, delegate
+            {
+                settings.AutoSwitchLayout = !settings.AutoSwitchLayout; settings.Save(); UpdateTray();
+            });
             miLearn = new ToolStripMenuItem("Learn from my typing", null, delegate
             {
                 settings.Learn = !settings.Learn; engine.Options.Learn = settings.Learn; settings.Save(); UpdateTray();
@@ -203,7 +207,7 @@ namespace TypeAssist
             var miExit = new ToolStripMenuItem("Exit", null, delegate { ExitThread(); });
 
             menu.Items.AddRange(new ToolStripItem[] {
-                miEnabled, new ToolStripSeparator(), miAutocorrect, miSuggest, miLearn, new ToolStripSeparator(),
+                miEnabled, new ToolStripSeparator(), miAutocorrect, miSuggest, miLayout, miLearn, new ToolStripSeparator(),
                 miPauseApp, miStartup, new ToolStripSeparator(), miForget, miFolder, miReload, miLog, miDiag, new ToolStripSeparator(), miAbout, miSite, new ToolStripSeparator(), miExit });
             menu.Opening += delegate { UpdateTray(); };
 
@@ -219,6 +223,7 @@ namespace TypeAssist
             miAutocorrect.Checked = settings.AutoCorrect;
             miSuggest.Checked = settings.Suggestions;
             miLearn.Checked = settings.Learn;
+            miLayout.Checked = settings.AutoSwitchLayout;
             miStartup.Checked = Startup.IsEnabled() && !Startup.DisabledByWindows();
             string app = tracker == null ? "" : tracker.LastApp;
             miPauseApp.Visible = app.Length > 0;
@@ -258,6 +263,7 @@ namespace TypeAssist
             settings.ZwnjFix = s.ZwnjFix;
             settings.Learn = s.Learn;
             settings.AcceptWithTab = s.AcceptWithTab;
+            settings.AutoSwitchLayout = s.AutoSwitchLayout;
             settings.SmartSpace = s.SmartSpace;
             settings.PopupDelayMs = s.PopupDelayMs;
             settings.ExcludedApps = s.ExcludedApps;

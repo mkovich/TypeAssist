@@ -69,6 +69,7 @@ namespace TypeAssist
         {
             public string Original, Replacement, Delimiter;
             public int Tick;
+            public IntPtr PrevLayout;   // set when the fix was a keyboard-language switch
         }
 
         public InputTracker(IKeyPlatform platform, Engine engine, Settings settings, Action<PopupState> publish, Action<string> onToggleHotkey, Action onFocusChanged)
@@ -449,22 +450,86 @@ namespace TypeAssist
 
         /// <summary>At a space: if the keys of this word spell a known word in another layout, switch to it.
         /// Returns 0 = no change, 1 = switched.</summary>
+        IntPtr switchFrom, switchTo;
+        string switchScreen, switchText;
+        int switchMineScore;
+
+        /// <summary>
+        /// After CheckLayout switched: should the word on screen be retyped in the other language and the keyboard
+        /// switched? Only when the evidence is strong: what we saw is not a word at all, and the other reading is a
+        /// common word. Retyping is safe even when Windows misreported the layout and the screen already shows the
+        /// other reading, because the same characters are written back.
+        /// </summary>
+        /// <summary>Ask the app to switch keyboards and read the keys that follow with the new layout.</summary>
+        void SwitchKeyboard(IntPtr target)
+        {
+            platform.RequestLayout(target);
+            effective = target;
+            IntPtr now = platform.ReportedLayout();
+            lastReported = now;
+            // Windows may apply the request a moment later (or never, in apps that misreport the layout):
+            // until it reports the new layout, keep reading keys with it ourselves.
+            overrideHkl = now == target ? IntPtr.Zero : target;
+        }
+
+        IntPtr LayoutFixTarget()
+        {
+            if (!settings.AutoSwitchLayout || switchText == null) return IntPtr.Zero;
+            return switchTo == BuiltInPersian ? platform.PersianLayout : switchTo;
+        }
+
         int CheckLayout()
         {
+            switchText = null;
             if (segment.Count == 0) return 0;
             string mine = Render(effective);
             if (mine == null) return 0;
             int a = TokensPlausibility(mine);
-            if (a >= 3) return 0;
+            if (a == 2) return 0;    // looks like a typo of a real word in this language: leave it to autocorrect
+            if (mine.Length <= 3)
+                foreach (char ch in mine)
+                    if (char.IsUpper(ch)) return 0;   // a capital letter was typed on purpose (Di, OK, US): leave it
+            // A "known" reading can still be noise in the word list (fi, hc, nv are listed English words, but
+            // they are also به، از، در typed on the wrong keyboard). Such a rare reading loses to a far more common
+            // word in the other language.
+            int mineWeight = -1;
+            if (a == 3 && AllWordChars(mine))
+            {
+                Lang ml = TextUtil.DetectLang(mine);
+                if (ml != Lang.None) lock (engine) mineWeight = engine.WordWeight(TextUtil.Normalize(mine, ml), ml);
+                if (mineWeight < 0 || mineWeight >= (mine.Length <= 2 ? 50000 : 2000)) return 0;
+            }
+            else if (a >= 3) return 0;
             IntPtr bestH = IntPtr.Zero;
             string bestText = null;
             foreach (IntPtr h in OtherLayouts())
             {
                 string theirs = Render(h);
                 if (theirs == null || theirs == mine) continue;
-                if (Plausibility(theirs) == 3) { bestH = h; bestText = theirs; if (h != BuiltInPersian) break; }
+                if (Plausibility(theirs) != 3) continue;
+                // Only a common word counts as evidence: a wrong guess here changes how every following
+                // key is read, so rare words, names and slang never trigger a switch.
+                Lang tl = TextUtil.DetectLang(theirs);
+                int w;
+                bool common;
+                lock (engine)
+                {
+                    string tk = TextUtil.Normalize(theirs, tl);
+                    w = engine.WordWeight(tk, tl);
+                    common = engine.IsCommonWord(tk, tl);
+                }
+                if (!common) continue;
+                if (a == 3 && w >= 0 && w < 50.0 * Math.Max(1, mineWeight)) continue;
+                bestH = h; bestText = theirs;
+                if (h != BuiltInPersian) break;
             }
             if (bestText == null) return 0;
+            if (a == 3) a = 1;   // treat the rare reading as not a word from here on
+            switchFrom = effective;
+            switchScreen = mine;
+            switchMineScore = a;
+            switchTo = bestH;
+            switchText = bestText;
             overrideHkl = bestH == lastReported ? IntPtr.Zero : bestH;
             effective = bestH;
             Log.W("layout cross-check: switched to " + Name(bestH) + " (Windows reports " + Name(lastReported) + ")");
@@ -547,6 +612,11 @@ namespace TypeAssist
                 segment.Clear();
                 Type(f.Replacement.Length + f.Delimiter.Length, f.Original + f.Delimiter, false);
                 lock (engine) { engine.Reject(f.Original); }
+                if (f.PrevLayout != IntPtr.Zero)
+                {
+                    // Undo of a keyboard-language fix: also switch the keyboard back.
+                    SwitchKeyboard(f.PrevLayout);
+                }
                 prevWord = f.Delimiter == " " ? f.Original : null;
                 word.Length = 0;
                 atBoundary = true;
@@ -623,8 +693,16 @@ namespace TypeAssist
 
             bool whitespace = d == " " || d == "\n" || d == "\t" || d == "\u00A0";
             bool otherLanguage = false;
-            bool unsureSwitch = false;
-            if (whitespace) CheckLayout();
+            int segLen = segment.Count;
+            IntPtr layoutFix = IntPtr.Zero;
+            if (whitespace)
+            {
+                if (CheckLayout() == 1 && d == " " && Safe())
+                {
+                    layoutFix = LayoutFixTarget();
+                    if (layoutFix != IntPtr.Zero) Log.W("wrong keyboard language: " + switchScreen.Length + " keys retyped as " + Name(switchTo));
+                }
+            }
             else if (word.Length > 0 || segment.Count > 1) otherLanguage = OtherLayoutMidWord();
             if (otherLanguage)
             {
@@ -643,7 +721,7 @@ namespace TypeAssist
                 string typed = word.ToString();
                 finished = typed;
                 Correction fix = null;
-                if (settings.AutoCorrect && IsCorrectionTrigger(d) && !unsureSwitch)
+                if (settings.AutoCorrect && IsCorrectionTrigger(d))
                 {
                     lock (engine) { fix = engine.TryCorrect(typed, PrevKey(), sentenceStart); }
                 }
@@ -718,6 +796,27 @@ namespace TypeAssist
                     Log.W("  word skipped: lang=" + TextUtil.DetectLang(word.ToString()) + " trusted=" + wordTrusted
                           + " focusChecked=" + (CheckedGeneration == FocusGeneration) + " password=" + InPasswordField);
                 }
+            }
+
+            if (layoutFix != IntPtr.Zero)
+            {
+                // The word was typed with the wrong keyboard language: put the intended word on screen
+                // (a typo fix above may already have done so) and switch the keyboard for what follows.
+                if (!swallow)
+                {
+                    Type(segLen, switchText + d, false);
+                    swallow = true;
+                    lastFix = new Pending { Original = switchScreen, Replacement = switchText, Delimiter = d, Tick = Environment.TickCount };
+                    if (finished == null && (wordTrusted || semiTrusted)) finished = switchText;
+                }
+                else if (lastFix != null)
+                {
+                    lastFix.Original = switchScreen;
+                }
+                if (lastFix != null)
+                    lastFix.PrevLayout = switchFrom == BuiltInPersian ? platform.PersianLayout : switchFrom;
+                SwitchKeyboard(layoutFix);
+                Diag("typed with the wrong keyboard: [" + switchScreen + "] → [" + (lastFix != null ? lastFix.Replacement : switchText) + "], keyboard switched to " + Name(layoutFix));
             }
 
             if (word.Length > 0 && finished == null) prevWord = null;

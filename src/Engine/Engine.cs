@@ -74,6 +74,31 @@ namespace TypeAssist
 
         readonly Dictionary<string, string> knownFixes = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// Frequency of key in the word list, or -1 when it must be treated as a real word regardless
+        /// (learned from the user, Finglish, or a word the user insisted on by undoing a fix).
+        /// </summary>
+        public int WordWeight(string key, Lang lang)
+        {
+            if (UserCount(key) >= Options.LearnThreshold || rejected.Contains(key)) return -1;
+            if (lang == Lang.En && finglish.Contains(key)) return -1;
+            var m = Model(lang);
+            return m == null ? 0 : m.Count(key);
+        }
+
+        /// <summary>How confidently key (already normalised) is a real, commonly used word.</summary>
+        public bool IsCommonWord(string key, Lang lang)
+        {
+            if (UserCount(key) >= Options.LearnThreshold && key.Length >= 3) return true;
+            var m = Model(lang);
+            if (m == null) return false;
+            int c = m.Count(key);
+            if (key.Length <= 1) return false;
+            if (key.Length == 2) return c >= 1000000;     // only the most common two-letter words (به، از، in, is)
+            if (key.Length == 3) return c >= 20000;
+            return c >= 2000;
+        }
+
         int UserCount(string key)
         {
             int c;
