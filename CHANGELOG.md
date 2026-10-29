@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-10-29
+
+### Added
+- **Earlier words typed on the wrong keyboard are fixed too.** If a word was too rare to switch on by itself,
+  it's retyped as soon as the next word shows the keyboard was wrong, whether TypeAssist switched the keyboard
+  or you did (`sghl o,fd` → `سلام خوبی`). Up to four earlier words, only if nothing else was typed in between.
+  Backspace right after undoes everything.
+- **Learns your two-word habits.** Besides what you type after each word, TypeAssist now learns what you type
+  after each pair of words and ranks it first next time (one use is enough).
+- **Remembers how you capitalise names** and suggests them that way.
+
+### Changed
+- A misspelt reading no longer blocks the keyboard switch when the other reading is a common word of four or
+  more letters (هدفخ → into).
+- Learned word pairs seen only once are pruned when the data grows large.
+
 ## [1.5.0] - 2026-10-29
 
 ### Added
@@ -43,6 +59,7 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.6.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.0
 [1.5.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.5.0
 [1.4.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.4.0
 [1.3.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.3.0

@@ -43,7 +43,7 @@ namespace TypeAssist
         readonly StringBuilder word = new StringBuilder();
         bool wordTrusted;       // we saw the boundary before this word, so we know its full text
         bool atBoundary;        // the last thing typed was a delimiter we saw
-        string prevWord;        // previous complete word in this run of typing (null = unknown)
+        string prevWord, prevWord2;        // previous complete word in this run of typing (null = unknown)
         bool sentenceStart = true;
         bool justAccepted;      // smart space was added after an accepted suggestion
         Pending lastFix;        // most recent autocorrection, undoable with Backspace
@@ -70,7 +70,19 @@ namespace TypeAssist
             public string Original, Replacement, Delimiter;
             public int Tick;
             public IntPtr PrevLayout;   // set when the fix was a keyboard-language switch
+            public List<string> RejectWords;   // words to never touch again if this fix is undone
         }
+
+        // The last few words typed, each followed by a single space, with nothing else typed since.
+        // Used to fix earlier words once it becomes clear they were typed with the wrong keyboard.
+        sealed class TypedWord
+        {
+            public List<KeyRec> Keys;
+            public IntPtr Layout;    // layout that produced Screen
+            public string Screen;    // what is on screen for this word
+            public bool Changed;     // corrected or retyped: leave it alone
+        }
+        readonly List<TypedWord> history = new List<TypedWord>();
 
         public InputTracker(IKeyPlatform platform, Engine engine, Settings settings, Action<PopupState> publish, Action<string> onToggleHotkey, Action onFocusChanged)
         {
@@ -253,7 +265,7 @@ namespace TypeAssist
                     segAtBoundary = word.Length == 0 ? atBoundary : wordTrusted;
                     segAfterReset = word.Length == 0 ? afterReset : semiTrusted;
                     segFirstInField = word.Length == 0 && charsSinceFocus == 0 && EmptyFieldGeneration == FocusGeneration;
-                    segPrev = prevWord;
+                    segPrev = prevWord; segPrev2 = prevWord2;
                     segSentence = sentenceStart;
                 }
                 if (segment.Count < 48) segment.Add(new KeyRec { Vk = k.vkCode, Scan = k.scanCode, Shift = shift });
@@ -333,7 +345,7 @@ namespace TypeAssist
         struct KeyRec { public uint Vk, Scan; public bool Shift; }
         readonly List<KeyRec> segment = new List<KeyRec>();
         bool segAtBoundary, segAfterReset, segFirstInField, segSentence;
-        string segPrev;
+        string segPrev, segPrev2;
         IntPtr overrideHkl, lastReported, effective;
 
         // Built-in Persian layout (standard Windows positions), read from physical scan codes. Used when
@@ -386,10 +398,12 @@ namespace TypeAssist
             return platform.Translate(vk, scan, shift, capsOn, hkl);
         }
 
-        string Render(IntPtr hkl)
+        string Render(IntPtr hkl) { return RenderKeys(segment, hkl); }
+
+        string RenderKeys(List<KeyRec> keys, IntPtr hkl)
         {
             var sb = new StringBuilder();
-            foreach (var r in segment)
+            foreach (var r in keys)
             {
                 string t = TranslateWith(hkl, r.Vk, r.Scan, r.Shift);
                 if (t == null || t.Length != 1) return null;
@@ -460,6 +474,93 @@ namespace TypeAssist
         /// common word. Retyping is safe even when Windows misreported the layout and the screen already shows the
         /// other reading, because the same characters are written back.
         /// </summary>
+        /// <summary>
+        /// mine is in the word list but rare (word-list noise such as هدفخ, fi, hc), and theirs is a common word
+        /// at least 50 times more frequent: mine was most likely theirs typed on the wrong keyboard.
+        /// </summary>
+        bool RareLosesTo(string mine, string theirs)
+        {
+            if (!AllWordChars(mine) || !AllWordChars(theirs)) return false;
+            Lang ml = TextUtil.DetectLang(mine), tl = TextUtil.DetectLang(theirs);
+            if (ml == Lang.None || tl == Lang.None) return false;
+            lock (engine)
+            {
+                int mw = engine.WordWeight(TextUtil.Normalize(mine, ml), ml);
+                if (mw < 0 || mw >= (mine.Length <= 2 ? 50000 : 2000)) return false;
+                string tk = TextUtil.Normalize(theirs, tl);
+                int tw = engine.WordWeight(tk, tl);
+                if (!engine.IsCommonWord(tk, tl)) return false;
+                return tw < 0 || tw >= 50.0 * Math.Max(1, mw);
+            }
+        }
+
+        static string LastWordOf(string t)
+        {
+            int i = t.LastIndexOf(' ');
+            return i < 0 ? t : t.Substring(i + 1);
+        }
+
+        /// <summary>
+        /// The current word was typed with the keyboard it is now on (because we just switched it, or the user did).
+        /// Words right before it that are gibberish in the layout they were typed with, but real words in this
+        /// layout, were typed with the wrong keyboard too: retype them. Example: "sghl خوبی " → "سلام خوبی ".
+        /// </summary>
+        bool FixEarlierWords(string cur, string d, bool curTyped, bool curWasSwitched)
+        {
+            // The current word must be a real word in the current layout: proof the user now types correctly.
+            if (TokensPlausibility(cur) < 3) return false;
+            var fix = new List<TypedWord>();
+            var newTexts = new List<string>();
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                var h = history[i];
+                if (h.Changed || h.Layout == effective) break;
+                if (h.Screen.Length < 2) break;   // single letters (a, I, و) are words in either language
+                if (h.Screen.Length <= 3) { bool caps = false; foreach (char ch in h.Screen) if (char.IsUpper(ch)) caps = true; if (caps) break; }
+                string again = RenderKeys(h.Keys, effective);
+                if (again == null || again == h.Screen || Plausibility(again) != 3) break;
+                int was = TokensPlausibility(h.Screen);
+                if (was == 2 && again.Length < 4) break;
+                if (was == 3 && !RareLosesTo(h.Screen, again)) break;
+                if (again.Length <= 3)
+                {
+                    // Short words are easily something else: only very common ones count.
+                    Lang al = TextUtil.DetectLang(again);
+                    bool common;
+                    lock (engine) common = al != Lang.None && engine.IsCommonWord(TextUtil.Normalize(again, al), al);
+                    if (!common) break;
+                }
+                fix.Insert(0, h);
+                newTexts.Insert(0, again);
+            }
+            if (fix.Count == 0) return false;
+
+            var oldJoined = new System.Text.StringBuilder();
+            foreach (var h in fix) oldJoined.Append(h.Screen).Append(' ');
+            string newJoined = string.Join(" ", newTexts.ToArray()) + " ";
+            // What is on screen after those words: the current word, plus the space if we already typed it.
+            int tail = cur.Length + (curTyped ? d.Length : 0);
+            Type(oldJoined.Length + tail, newJoined + cur + d, false);
+
+            string curOriginal = curTyped && lastFix != null ? lastFix.Original : cur;
+            var reject = new List<string>();
+            foreach (var h in fix) reject.Add(h.Screen);
+            if (curWasSwitched && lastFix != null) reject.Add(lastFix.Original);
+            lastFix = new Pending
+            {
+                Original = oldJoined + curOriginal,
+                Replacement = newJoined + cur,
+                Delimiter = d,
+                Tick = Environment.TickCount,
+                PrevLayout = curWasSwitched && lastFix != null ? lastFix.PrevLayout : IntPtr.Zero,
+                RejectWords = reject
+            };
+            foreach (var h in fix) history.Remove(h);
+            Log.W("wrong keyboard language: " + fix.Count + " earlier word(s) retyped");
+            Diag("earlier words typed with the wrong keyboard: [" + oldJoined.ToString().Trim() + "] → [" + newJoined.Trim() + "]");
+            return true;
+        }
+
         /// <summary>Ask the app to switch keyboards and read the keys that follow with the new layout.</summary>
         void SwitchKeyboard(IntPtr target)
         {
@@ -485,7 +586,8 @@ namespace TypeAssist
             string mine = Render(effective);
             if (mine == null) return 0;
             int a = TokensPlausibility(mine);
-            if (a == 2) return 0;    // looks like a typo of a real word in this language: leave it to autocorrect
+            // a == 2: looks like a typo of a real word in this language. Only a common longer word in the
+            // other language beats that (هدفخ is a typo of هدف, but it is also "into" on the wrong keyboard).
             if (mine.Length <= 3)
                 foreach (char ch in mine)
                     if (char.IsUpper(ch)) return 0;   // a capital letter was typed on purpose (Di, OK, US): leave it
@@ -519,12 +621,13 @@ namespace TypeAssist
                     common = engine.IsCommonWord(tk, tl);
                 }
                 if (!common) continue;
+                if (a == 2 && theirs.Length < 4) continue;
                 if (a == 3 && w >= 0 && w < 50.0 * Math.Max(1, mineWeight)) continue;
                 bestH = h; bestText = theirs;
                 if (h != BuiltInPersian) break;
             }
             if (bestText == null) return 0;
-            if (a == 3) a = 1;   // treat the rare reading as not a word from here on
+            if (a >= 2) a = 1;   // treat the rare or misspelt reading as not a word from here on
             switchFrom = effective;
             switchScreen = mine;
             switchMineScore = a;
@@ -537,7 +640,7 @@ namespace TypeAssist
             // What is on screen is the other reading: rebuild the word from the start of these keys.
             word.Length = 0;
             word.Append(bestText);
-            prevWord = segPrev;
+            prevWord = segPrev; prevWord2 = segPrev2;
             sentenceStart = segSentence;
             atBoundary = false;
             alt = null;
@@ -611,13 +714,18 @@ namespace TypeAssist
                 lastFix = null;
                 segment.Clear();
                 Type(f.Replacement.Length + f.Delimiter.Length, f.Original + f.Delimiter, false);
-                lock (engine) { engine.Reject(f.Original); }
+                lock (engine)
+                {
+                    if (f.RejectWords != null) foreach (string w in f.RejectWords) engine.Reject(w);
+                    else engine.Reject(f.Original);
+                }
+                history.Clear();
                 if (f.PrevLayout != IntPtr.Zero)
                 {
                     // Undo of a keyboard-language fix: also switch the keyboard back.
                     SwitchKeyboard(f.PrevLayout);
                 }
-                prevWord = f.Delimiter == " " ? f.Original : null;
+                prevWord = f.Delimiter == " " ? LastWordOf(f.Original) : null; if (prevWord == null) prevWord2 = null;
                 word.Length = 0;
                 atBoundary = true;
                 shown = new List<Suggestion>();
@@ -626,6 +734,7 @@ namespace TypeAssist
             }
             lastFix = null;
             alt = null;
+            history.Clear();
             if (justAccepted)
             {
                 justAccepted = false;
@@ -678,7 +787,7 @@ namespace TypeAssist
                 {
                     Type(1, d + " ", false);
                     bool end = IsSentenceEnd(d);
-                    prevWord = null;
+                    prevWord = null; prevWord2 = null;
                     word.Length = 0;
                     atBoundary = true;
                     wordTrusted = true;
@@ -707,11 +816,12 @@ namespace TypeAssist
             if (otherLanguage)
             {
                 // e.g. "و" typed while we think the layout is English (we see ","): leave everything alone.
+                // (The key stays part of this word's keys, so the earlier-words history stays valid.)
                 word.Length = 0;
                 wordTrusted = false;
                 semiTrusted = false;
                 atBoundary = false;
-                prevWord = null;
+                prevWord = null; prevWord2 = null;
                 UpdateSuggestions();
                 return false;
             }
@@ -755,7 +865,7 @@ namespace TypeAssist
                     lock (engine) { c = engine.CorrectionCandidates(typed, 3); }
                     if (c.Count > 0) alt = new Alternatives { Typed = typed, Delimiter = d, Items = c };
                 }
-                if (settings.Learn) lock (engine) { engine.Learn(prevWord, finished); }
+                if (settings.Learn) lock (engine) { engine.Learn(prevWord2, prevWord, finished); }
             }
             else if (word.Length > 0 && semiTrusted && Safe())
             {
@@ -819,7 +929,26 @@ namespace TypeAssist
                 Diag("typed with the wrong keyboard: [" + switchScreen + "] → [" + (lastFix != null ? lastFix.Replacement : switchText) + "], keyboard switched to " + Name(layoutFix));
             }
 
-            if (word.Length > 0 && finished == null) prevWord = null;
+            // ---- earlier words typed with the wrong keyboard
+            if (d == " " && segLen > 0 && Safe())
+            {
+                bool beliefOnly = switchText != null && layoutFix == IntPtr.Zero;
+                string cur = swallow ? (lastFix != null ? lastFix.Replacement : null) : Render(effective);
+                if (cur != null && !beliefOnly && settings.AutoSwitchLayout && history.Count > 0)
+                {
+                    if (FixEarlierWords(cur, d, swallow, layoutFix != IntPtr.Zero)) swallow = true;
+                    cur = lastFix != null && swallow ? LastWordOf(lastFix.Replacement) : cur;
+                }
+                if (cur != null && !beliefOnly)
+                {
+                    history.Add(new TypedWord { Keys = new List<KeyRec>(segment), Layout = effective, Screen = cur, Changed = swallow });
+                    if (history.Count > 4) history.RemoveAt(0);
+                }
+                else history.Clear();
+            }
+            else history.Clear();
+
+            if (word.Length > 0 && finished == null) { prevWord = null; prevWord2 = null; }
             charsSinceFocus++;
             AfterBoundary(d, finished);
             if (isEnter) lastFix = null;   // the line may already be sent; never "undo" into a new field
@@ -834,9 +963,9 @@ namespace TypeAssist
             word.Length = 0;
             atBoundary = StartsFreshWord(d);
             wordTrusted = atBoundary;
-            if (IsSentenceEnd(d)) { sentenceStart = true; prevWord = null; }
-            else if (d == " ") { if (finished != null) { prevWord = finished; sentenceStart = false; } }
-            else { prevWord = null; if (d != "\"" && d != "(" && d != "«") sentenceStart = false; }
+            if (IsSentenceEnd(d)) { sentenceStart = true; prevWord = null; prevWord2 = null; }
+            else if (d == " ") { if (finished != null) { prevWord2 = prevWord; prevWord = finished; sentenceStart = false; } }
+            else { prevWord = null; prevWord2 = null; if (d != "\"" && d != "(" && d != "«") sentenceStart = false; }
             UpdateSuggestions();
         }
 
@@ -852,7 +981,7 @@ namespace TypeAssist
             word.Length = 0;
             wordTrusted = false;
             atBoundary = false;
-            prevWord = null;
+            prevWord = null; prevWord2 = null;
             sentenceStart = false;
             justAccepted = false;
             lastFix = null;
@@ -860,6 +989,7 @@ namespace TypeAssist
             afterReset = true;
             semiTrusted = false;
             segment.Clear();
+            history.Clear();
             if (!keepPopup && shown.Count > 0) { shown = new List<Suggestion>(); Publish(); }
             else if (!keepPopup) Publish();
         }
@@ -881,7 +1011,7 @@ namespace TypeAssist
                     }
                     else if (word.Length > 0 && wordTrusted)
                     {
-                        items = engine.Suggest(word.ToString(), prevWord, 3);
+                        items = engine.Suggest(word.ToString(), prevWord, 3, prevWord2);
                         if (items.Count == 0 && word.Length >= 3)
                             items = engine.CorrectionCandidates(word.ToString(), 3);   // unknown word, unsure fix
                     }
@@ -891,7 +1021,7 @@ namespace TypeAssist
                     }
                     else if (word.Length == 0 && atBoundary && prevWord != null)
                     {
-                        items = engine.Suggest("", prevWord, 3);
+                        items = engine.Suggest("", prevWord, 3, prevWord2);
                         if (sentenceStart) foreach (var s in items) s.Text = TextUtil.MatchCase("A", s.Text);
                     }
                 }
@@ -921,13 +1051,14 @@ namespace TypeAssist
             if (gen != generation || index < 0 || index >= shown.Count || !Safe()) return;
             var s = shown[index];
             segment.Clear();
+            history.Clear();
             if (alt != null && word.Length == 0 && s.Kind == SuggestionKind.Correction)
             {
                 // Replace the word just typed (and its space) with the chosen spelling.
                 var a = alt;
                 alt = null;
                 Type(a.Typed.Length + a.Delimiter.Length, s.Text + a.Delimiter, releaseAlt);
-                if (settings.Learn) lock (engine) { engine.Learn(null, s.Text); }
+                if (settings.Learn) lock (engine) { engine.Learn(null, null, s.Text); }
                 prevWord = s.Text;
                 atBoundary = true;
                 wordTrusted = true;
@@ -941,14 +1072,14 @@ namespace TypeAssist
                 Type(0, text.Substring(current.Length) + space, releaseAlt);
             else
                 Type(current.Length, text + space, releaseAlt);
-            if (settings.Learn) lock (engine) { engine.Learn(prevWord, text); }
+            if (settings.Learn) lock (engine) { engine.Learn(prevWord2, prevWord, text); }
             word.Length = 0;
             atBoundary = true;
             wordTrusted = true;
             lastFix = null;
             if (settings.SmartSpace)
             {
-                prevWord = text;
+                prevWord2 = prevWord; prevWord = text;
                 sentenceStart = false;
                 justAccepted = true;
                 UpdateSuggestions();

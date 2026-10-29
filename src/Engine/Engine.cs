@@ -42,6 +42,7 @@ namespace TypeAssist
         public EngineOptions Options = new EngineOptions();
 
         readonly Dictionary<string, int> userWords = new Dictionary<string, int>(StringComparer.Ordinal);
+        readonly Dictionary<string, int[]> userCase = new Dictionary<string, int[]>(StringComparer.Ordinal);  // [capitalised, lower]
         readonly Dictionary<string, Dictionary<string, int>> userNext = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
         readonly HashSet<string> rejected = new HashSet<string>(StringComparer.Ordinal);
         readonly HashSet<string> finglish = new HashSet<string>(StringComparer.Ordinal);
@@ -413,6 +414,15 @@ namespace TypeAssist
         /// </summary>
         public List<Suggestion> Suggest(string partial, string prevWord, int max)
         {
+            return Suggest(partial, prevWord, max, null);
+        }
+
+        /// <summary>Key under which "what the user types after these two words" is learned.</summary>
+        static string PairKey(string w1, string w2) { return w1 + " " + w2; }
+
+        /// <param name="prevWord2">the word before prevWord, for the user's own two-word habits (may be null).</param>
+        public List<Suggestion> Suggest(string partial, string prevWord, int max, string prevWord2)
+        {
             var scores = new Dictionary<string, double>(StringComparer.Ordinal);
             Lang lang;
             string prevKey = null;
@@ -420,6 +430,15 @@ namespace TypeAssist
             {
                 Lang pl = TextUtil.DetectLang(prevWord);
                 if (pl != Lang.None) prevKey = TextUtil.Normalize(prevWord, pl);
+            }
+            // What the user has typed after these exact two words: the strongest personal signal.
+            Dictionary<string, int> tri = null;
+            int triTotal = 0;
+            if (prevKey != null && !string.IsNullOrEmpty(prevWord2) && TextUtil.DetectLang(prevWord2) == TextUtil.DetectLang(prevWord))
+            {
+                string k2 = TextUtil.Normalize(prevWord2, TextUtil.DetectLang(prevWord2));
+                if (userNext.TryGetValue(PairKey(k2, prevKey), out tri))
+                    foreach (var kv in tri) triTotal += kv.Value;
             }
 
             if (string.IsNullOrEmpty(partial))
@@ -441,6 +460,13 @@ namespace TypeAssist
                         double prev;
                         scores.TryGetValue(kv.Key, out prev);
                         scores[kv.Key] = prev + 20.0 * kv.Value / denom;
+                    }
+                if (tri != null)
+                    foreach (var kv in tri)
+                    {
+                        double prev;
+                        scores.TryGetValue(kv.Key, out prev);
+                        scores[kv.Key] = prev + 0.6 * kv.Value / (triTotal + 1.0);
                     }
                 var list = Top(scores, max, SuggestionKind.NextWord, null);
                 list.RemoveAll(s => s.Score < 0.06 || s.Text.Length < 2);
@@ -501,6 +527,14 @@ namespace TypeAssist
                         scores.TryGetValue(kv.Key, out prev);
                         scores[kv.Key] = prev + 0.6 * kv.Value / (kv.Value + 1.0);
                     }
+                if (tri != null)
+                    foreach (var kv in tri)
+                    {
+                        if (kv.Key.Length <= key.Length || !kv.Key.StartsWith(key, StringComparison.Ordinal)) continue;
+                        double prev;
+                        scores.TryGetValue(kv.Key, out prev);
+                        scores[kv.Key] = prev + 1.0 * kv.Value / (kv.Value + 1.0);
+                    }
             }
 
             // Only words that save the user at least two keystrokes
@@ -510,11 +544,23 @@ namespace TypeAssist
             return res;
         }
 
-        static List<Suggestion> Top(Dictionary<string, double> scores, int max, SuggestionKind kind, string typed)
+        /// <summary>Names the user writes with a capital (Hormuz, Dubai) are suggested that way.</summary>
+        string Display(string key)
+        {
+            int[] cc;
+            if (key.Length > 1 && userCase.TryGetValue(key, out cc) && cc[0] > cc[1] && En.Count(key) < 50000)
+                return char.ToUpperInvariant(key[0]) + key.Substring(1);
+            return key;
+        }
+
+        List<Suggestion> Top(Dictionary<string, double> scores, int max, SuggestionKind kind, string typed)
         {
             var list = new List<Suggestion>();
             foreach (var kv in scores)
-                list.Add(new Suggestion { Text = typed == null ? kv.Key : TextUtil.MatchCase(typed, kv.Key), Kind = kind, Score = kv.Value });
+            {
+                string shown = Display(kv.Key);
+                list.Add(new Suggestion { Text = typed == null ? shown : (shown != kv.Key ? TextUtil.MatchCase(typed, shown) : TextUtil.MatchCase(typed, kv.Key)), Kind = kind, Score = kv.Value });
+            }
             list.Sort((a, b) => b.Score.CompareTo(a.Score));
             if (list.Count > max) list.RemoveRange(max, list.Count - max);
             return list;
@@ -522,7 +568,13 @@ namespace TypeAssist
 
         // ------------------------------------------------------------------ learning
 
-        public void Learn(string prevWord, string word)
+        public void Learn(string prevWord, string word) { Learn(null, prevWord, word); }
+
+        /// <summary>
+        /// Remember that the user typed word after prevWord (and after "prevWord2 prevWord").
+        /// Over time this makes suggestions follow the user's own phrases.
+        /// </summary>
+        public void Learn(string prevWord2, string prevWord, string word)
         {
             if (!Options.Learn || string.IsNullOrEmpty(word)) return;
             Lang lang = TextUtil.DetectLang(word);
@@ -532,6 +584,12 @@ namespace TypeAssist
             int c;
             userWords.TryGetValue(key, out c);
             userWords[key] = c + 1;
+            if (lang == Lang.En && word.Length > 1 && !TextUtil.IsAllUpper(word))
+            {
+                int[] cc;
+                if (!userCase.TryGetValue(key, out cc)) { cc = new int[2]; userCase[key] = cc; }
+                cc[char.IsUpper(word[0]) ? 0 : 1]++;
+            }
             if (!string.IsNullOrEmpty(prevWord) && TextUtil.DetectLang(prevWord) == lang)
             {
                 string pk = TextUtil.Normalize(prevWord, lang);
@@ -539,8 +597,30 @@ namespace TypeAssist
                 if (!userNext.TryGetValue(pk, out d)) { d = new Dictionary<string, int>(StringComparer.Ordinal); userNext[pk] = d; }
                 d.TryGetValue(key, out c);
                 d[key] = c + 1;
+                if (!string.IsNullOrEmpty(prevWord2) && TextUtil.DetectLang(prevWord2) == lang)
+                {
+                    string pk2 = PairKey(TextUtil.Normalize(prevWord2, lang), pk);
+                    if (!userNext.TryGetValue(pk2, out d)) { d = new Dictionary<string, int>(StringComparer.Ordinal); userNext[pk2] = d; }
+                    d.TryGetValue(key, out c);
+                    d[key] = c + 1;
+                }
+                if (userNext.Count > 200000) PruneUserNext();
             }
             Dirty = true;
+        }
+
+        /// <summary>Keep the learned data small: drop word pairs seen only once.</summary>
+        void PruneUserNext()
+        {
+            var empty = new List<string>();
+            foreach (var a in userNext)
+            {
+                var once = new List<string>();
+                foreach (var b in a.Value) if (b.Value <= 1) once.Add(b.Key);
+                foreach (string k in once) a.Value.Remove(k);
+                if (a.Value.Count == 0) empty.Add(a.Key);
+            }
+            foreach (string k in empty) userNext.Remove(k);
         }
 
         /// <summary>The user undid a correction: never correct this word again.</summary>
@@ -554,7 +634,7 @@ namespace TypeAssist
 
         public void ForgetLearned()
         {
-            userWords.Clear(); userNext.Clear(); rejected.Clear(); Dirty = true;
+            userWords.Clear(); userNext.Clear(); userCase.Clear(); rejected.Clear(); Dirty = true;
         }
 
         // ------------------------------------------------------------------ persistence
@@ -568,7 +648,13 @@ namespace TypeAssist
         public string[] SnapshotUser()
         {
             var sb = new StringBuilder();
-            foreach (var kv in userWords) sb.Append(kv.Key).Append('\t').Append(kv.Value).Append('\n');
+            foreach (var kv in userWords)
+            {
+                sb.Append(kv.Key).Append('\t').Append(kv.Value);
+                int[] cc;
+                if (userCase.TryGetValue(kv.Key, out cc)) sb.Append('\t').Append(cc[0]).Append('\t').Append(cc[1]);
+                sb.Append('\n');
+            }
             string words = sb.ToString();
             sb.Clear();
             foreach (var a in userNext)
@@ -606,7 +692,9 @@ namespace TypeAssist
                 {
                     string[] f = line.Split('\t');
                     int c;
-                    if (f.Length == 2 && int.TryParse(f[1], out c)) userWords[f[0]] = c;
+                    if (f.Length >= 2 && int.TryParse(f[1], out c)) userWords[f[0]] = c;
+                    int up, low;
+                    if (f.Length == 4 && int.TryParse(f[2], out up) && int.TryParse(f[3], out low)) userCase[f[0]] = new[] { up, low };
                 }
             p = Path.Combine(dir, "user_next.tsv");
             if (File.Exists(p))

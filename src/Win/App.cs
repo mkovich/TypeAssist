@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("TypeAssist")]
 [assembly: AssemblyCompany("mkovich.com")]
 [assembly: AssemblyCopyright("© 2026 MH.Kovich · mkovich.com")]
-[assembly: AssemblyVersion("1.5.0.0")]
-[assembly: AssemblyFileVersion("1.5.0.0")]
+[assembly: AssemblyVersion("1.6.0.0")]
+[assembly: AssemblyFileVersion("1.6.0.0")]
 
 namespace TypeAssist
 {

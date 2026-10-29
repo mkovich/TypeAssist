@@ -298,6 +298,46 @@ namespace TypeAssist.Tests
             Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En; pf.Requests = 0;
             Keys("ok lol brb asap ");
             Check("short english words stay english (requests=" + pf.Requests + ")", pf.Requests == 0 ? "ok lol brb asap " : "switched: " + pf.Text);
+            // earlier word typed with the wrong keyboard is fixed once the next word gives it away
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("rvf,kj ");          // قربونت on the English keyboard: not common enough to act on alone
+            Check("uncommon word alone: left as typed", "rvf,kj ");
+            Keys("o,fd ");            // خوبی: common → switch, and the word before is fixed too
+            Check("earlier word fixed with the next one", "قربونت خوبی ");
+            Keys("\b");
+            Check("backspace undoes both words", "rvf,kj o,fd ");
+            Check("…and the keyboard goes back", pf.Real == FakePlatform.En ? "rvf,kj o,fd " : "keyboard not restored");
+            // user switches the keyboard by hand after a wrong word
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("rvf,kj ");
+            pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;      // Alt+Shift
+            Keys("داداش ");
+            Check("manual switch: earlier word fixed", "قربونت داداش ");
+            // real english words before a manual switch are never touched
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("hello Kovich ");
+            pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;
+            Keys("خوبی ");
+            Check("english words and names before a switch untouched", "hello Kovich خوبی ");
+            // the earlier word must be right before: a click in between breaks the chain
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Keys("rvf,kj ");
+            tr.SimulateClick();
+            pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;
+            Keys("خوبی ");
+            Check("click in between: earlier word left alone", "rvf,kj خوبی ");
+            pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // learns what the user types after two words, and suggests it next time
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+            Type("see you at the Hormuz office ");
+            Fresh("notepad");
+            Type("see you at the ");
+            string sug = last != null && last.Items.Count > 0 ? last.Items[0].Text : "(none)";
+            Check("after one use: suggests the user's own next word (" + sug + ")", sug == "Hormuz" ? "see you at the " : "suggested " + sug);
+            Type("\t");
+            Check("…Tab accepts it, with the user's capital", "see you at the Hormuz ");
+
             // setting off: nothing retyped
             settings.AutoSwitchLayout = false;
             Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;

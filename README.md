@@ -44,7 +44,7 @@ More detail in [SECURITY.md](SECURITY.md).
 
 ## Download and run
 
-1. Download `TypeAssist-1.5.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
+1. Download `TypeAssist-1.6.0.zip` from the [latest release](https://github.com/mkovich/TypeAssist/releases/latest) and extract it (for example to `C:\Tools\TypeAssist`).
 2. Run `TypeAssist.exe`. It needs .NET Framework 4.8, which Windows 10 and 11 already include.
 3. **Windows SmartScreen warning:** because the exe isn't digitally signed, Windows may show
    *"Windows protected your PC"*. Click **More info → Run anyway**. This is normal for
@@ -76,7 +76,9 @@ that extra space is removed.
 
 Typed Persian while the keyboard was on English (`sghl` instead of `سلام`), or English on the
 Persian keyboard (`اثممخ` instead of `hello`)? When you press Space, TypeAssist retypes the word
-in the right language and switches the keyboard for you, from the very first word. Press
+in the right language and switches the keyboard for you, from the very first word. If a word
+was too rare to be sure of on its own, it's fixed as soon as the next word gives it away, whether
+TypeAssist switches the keyboard or you do (`sghl o,fd` → `سلام خوبی`). Press
 **Backspace** right away to undo: the word and the keyboard go back, and that word is never
 switched again. It only acts when what you typed isn't a word and the other reading is a common
 word, so names, slang and short words like `ok` are left alone. Turn it off from the tray menu →
@@ -93,8 +95,16 @@ word, so names, slang and short words like `ok` are left alone. Turn it off from
 
 ## Learning
 
-TypeAssist learns words you type often and the order you use them in, so suggestions
-get more personal over time. An unknown word you type 3 times is never corrected again.
+TypeAssist learns from what you type, so suggestions get more personal over time:
+
+- **Your vocabulary.** An unknown word you type 3 times is never corrected again.
+- **What you type after each word, and after each pair of words.** After you've typed
+  "see you at the Hormuz office" once, typing "see you at the" offers **Hormuz** first.
+  Your own habits outrank the general word lists.
+- **How you write names.** Words you write with a capital (Hormuz, Dubai) are suggested that way.
+
+Everything stays on your PC in `%AppData%\TypeAssist`. Rare pairs are pruned automatically so
+the files stay small.
 You can turn learning off or clear everything it has learned from the tray menu.
 
 ## Settings
