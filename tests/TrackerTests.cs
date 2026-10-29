@@ -20,8 +20,15 @@ namespace TypeAssist.Tests
         public IntPtr Real = En;          // what the app really uses
         const string Qw = "qwertyuiop[]asdfghjkl;'zxcvbnm,";
         const string FaKeys = "ضصثقفغعهخحجچشسیبلاتنمکگظطزرذدپو";
+        // A third, Arabic-script layout (like Arabic or Dari) where a few keys differ: n gives ى instead of د.
+        public static readonly IntPtr Ar = new IntPtr(0x04010401);
         public static string Map(char qwerty, IntPtr hkl)
         {
+            if (hkl == Ar)
+            {
+                if (qwerty == 'n') return "ى";
+                hkl = Fa;
+            }
             if (hkl == Fa) { int i = Qw.IndexOf(qwerty); if (i >= 0) return FaKeys[i].ToString(); }
             return qwerty.ToString();
         }
@@ -347,6 +354,21 @@ namespace TypeAssist.Tests
             Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En; pf.Requests = 0;
             Keys("fun hi ");
             Check("english words that are also persian keys stay", pf.Requests == 0 ? "fun hi " : "switched: " + pf.Text);
+            // Windows says English but the keyboard really is Persian (or the other way round): بعد must still stay
+            Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.Fa; pf.Requests = 0; pf.IgnoresRequests = true;
+            Keys("بعد ");
+            Check("wrong layout reported, بعد typed: not switched (requests=" + pf.Requests + ")", pf.Requests == 0 ? "بعد " : "switched: " + pf.Text);
+            Fresh("notepad2"); pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.En; pf.Requests = 0;
+            Keys("fun ");
+            Check("wrong layout reported, fun typed: not switched", pf.Requests == 0 ? "fun " : "switched: " + pf.Text);
+            pf.IgnoresRequests = false; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // keyboard reported as a third Arabic-script layout: بعد reads as بعى there, but it is still a word
+            Fresh("notepad3"); pf.Layouts = new[] { FakePlatform.En, FakePlatform.Ar }; pf.Reported = FakePlatform.Ar; pf.Real = FakePlatform.Fa; pf.Requests = 0;
+            Keys("بعد ");
+            Check("third layout: بعد not switched (requests=" + pf.Requests + ")", pf.Requests == 0 ? "بعد " : "switched: " + pf.Text);
+            pf.Layouts = new[] { FakePlatform.En, FakePlatform.Fa }; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
             // undo blocks the switch for good, in both directions
             Fresh("notepad"); pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
             Keys("sghl ");

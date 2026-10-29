@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] - 2026-10-29
+
+### Fixed
+- `بعد` could still be turned into `fun` (and the keyboard switched) when Windows reported a different
+  Arabic-script layout than the one actually typing (for example Arabic or Dari alongside Persian), because
+  `بعد` read with that layout is not a word. Keys are now never switched if they spell a word in **any**
+  installed layout, so words that mean something in both languages always stay as typed.
+
 ## [1.6.1] - 2026-10-29
 
 ### Fixed
@@ -68,6 +76,7 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.6.2]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.2
 [1.6.1]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.1
 [1.6.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.0
 [1.5.0]: https://github.com/mkovich/TypeAssist/releases/tag/v1.5.0

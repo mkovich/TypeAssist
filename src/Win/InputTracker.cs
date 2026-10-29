@@ -511,6 +511,30 @@ namespace TypeAssist
         /// common word. Retyping is safe even when Windows misreported the layout and the screen already shows the
         /// other reading, because the same characters are written back.
         /// </summary>
+        /// <summary>
+        /// True when the keys also spell a word (or a near-word) in any other keyboard layout, including the one
+        /// we think is active. Then the keys mean something in both languages and are never switched, whatever
+        /// Windows reports about the current keyboard (بعد and fun are the same three keys).
+        /// </summary>
+        bool MeaningfulElsewhere(List<KeyRec> keys, IntPtr target, string targetText)
+        {
+            var layouts = new List<IntPtr>(platform.InstalledLayouts());
+            if (!layouts.Contains(effective)) layouts.Add(effective);
+            layouts.Add(BuiltInPersian);
+            foreach (IntPtr h in layouts)
+            {
+                if (h == target) continue;
+                string r = RenderKeys(keys, h);
+                if (r == null || r == targetText || r.Length < 2) continue;
+                if (TokensPlausibility(r) >= 2)
+                {
+                    Diag("not switched: [" + r + "] is also a word (" + Name(h) + ")");
+                    return true;
+                }
+            }
+            return false;
+        }
+
         static string LastWordOf(string t)
         {
             int i = t.LastIndexOf(' ');
@@ -536,6 +560,7 @@ namespace TypeAssist
                 if (h.Screen.Length <= 3) { bool caps = false; foreach (char ch in h.Screen) if (char.IsUpper(ch)) caps = true; if (caps) break; }
                 string again = RenderKeys(h.Keys, effective);
                 if (again == null || again == h.Screen || Plausibility(again) != 3) break;
+                if (MeaningfulElsewhere(h.Keys, effective, again)) break;
                 if (TokensPlausibility(h.Screen) > 1) break;   // only clear gibberish is retyped
                 if (again.Length <= 3)
                 {
@@ -631,6 +656,7 @@ namespace TypeAssist
                 if (h != BuiltInPersian) break;
             }
             if (bestText == null) return 0;
+            if (MeaningfulElsewhere(segment, bestH, bestText)) return 0;
             switchFrom = effective;
             switchScreen = mine;
             switchMineScore = a;
