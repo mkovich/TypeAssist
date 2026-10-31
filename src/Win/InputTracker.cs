@@ -360,6 +360,16 @@ namespace TypeAssist
                     + "    installed: " + InstalledNames()
                     + "    last key → " + (text == null ? "dead key" : text.Length == 0 ? "(none)" : "'" + text + "' U+" + ((int)text[0]).ToString("X4"))
                     + "    word so far: [" + word + "]";
+            if (text == " " && vk == Native.VK_SPACE && shift)
+            {
+                // Shift+Space is the Persian half-space. If we read it as a plain space, Windows is reporting a
+                // different keyboard than the one typing: don't treat it as the end of a word and don't touch
+                // anything around it.
+                Diag("Shift+Space: possibly a half-space, word left alone");
+                Reset(false);
+                afterReset = false;     // the rest of this word is a fragment: no fixes at all
+                return false;
+            }
             if (text == null) { Reset(false); return false; }      // dead key or unknown
             if (text.Length == 0) return false;                      // F-keys, media keys...
             char c = text[0];
@@ -597,13 +607,34 @@ namespace TypeAssist
         /// about which keyboard is active (Windows does not always tell), and a "typo fix" would replace a
         /// correct word with something from the other language. Leave it alone.
         /// </summary>
-        bool WordInOtherLayout(string typed)
+        bool WordInOtherLayout(string typed, string d)
         {
             if (segmentBroken) return false;                    // characters came ready-made: they are exact
-            var keys = segment;
-            // At punctuation the punctuation key itself is already recorded: leave it out.
-            if (keys.Count == typed.Length + 1) keys = segment.GetRange(0, typed.Length);
-            if (keys.Count != typed.Length) return true;        // can't line keys up with letters: be safe
+            var keys = new List<KeyRec>(segment);
+            // A punctuation delimiter is already recorded as the last key: leave it out.
+            bool whitespace = d == " " || d == "\n" || d == "\t" || d == "\u00A0";
+            if (!whitespace && keys.Count > 0) keys.RemoveAt(keys.Count - 1);
+            // Our reading has punctuation inside (o,hn'd) but another keyboard reads all the keys as letters
+            // (خانوادگی): the "word" is a fragment of a word in the other language. Never touch it.
+            string full = RenderKeys(keys, effective);
+            if (full != null && !AllWordChars(full) && keys.Count >= 2)
+            {
+                var all = new List<IntPtr>(platform.InstalledLayouts());
+                all.Add(BuiltInPersian);
+                foreach (IntPtr h in all)
+                {
+                    if (h == effective) continue;
+                    string r = RenderKeys(keys, h);
+                    if (r != null && AllWordChars(r) && TextUtil.DetectLang(r) != Lang.None)
+                    {
+                        Diag("not corrected: [" + full + "] reads as [" + r + "] (" + Name(h) + ")");
+                        return true;
+                    }
+                }
+            }
+            // The word is the last typed.Length keys (a bracket or quote before it may also be recorded).
+            if (keys.Count < typed.Length) return true;         // can't line keys up with letters: be safe
+            keys = keys.GetRange(keys.Count - typed.Length, typed.Length);
             var layouts = new List<IntPtr>(platform.InstalledLayouts());
             layouts.Add(BuiltInPersian);
             foreach (IntPtr h in layouts)
@@ -611,11 +642,7 @@ namespace TypeAssist
                 if (h == effective) continue;
                 string r = RenderKeys(keys, h);
                 if (r == null || r == typed || r.Length < 2 || !AllWordChars(r)) continue;
-                Lang rl = TextUtil.DetectLang(r);
-                if (rl == Lang.None) continue;
-                bool common;
-                lock (engine) common = engine.IsCommonWord(TextUtil.Normalize(r, rl), rl);
-                if (common)
+                if (Plausibility(r) == 3)
                 {
                     Diag("not corrected: the keys also spell [" + r + "] (" + Name(h) + ")");
                     return true;
@@ -637,6 +664,22 @@ namespace TypeAssist
                 string key = TextUtil.Normalize(r, l);
                 return m.Contains(key) || m.Complete(key, 1, 20000).Count > 0;
             }
+        }
+
+        /// <summary>
+        /// Text we may delete with one Backspace per character. Apps disagree on how Backspace treats a
+        /// half-space (ZWNJ) or a diacritic: Chrome, Edge and Telegram delete it together with the letter before
+        /// it, Notepad deletes it alone. We can't know which, so we never delete such text automatically.
+        /// </summary>
+        static bool DeletesSafely(string onScreen)
+        {
+            if (onScreen == null) return false;
+            foreach (char c in onScreen)
+            {
+                if (c == '\u200C' || c == '\u200D' || char.IsSurrogate(c)) return false;
+                if ((c >= '\u064B' && c <= '\u065F') || c == '\u0670' || c == '\u0640') return false;
+            }
+            return true;
         }
 
         static string LastWordOf(string t)
@@ -681,6 +724,7 @@ namespace TypeAssist
 
             var oldJoined = new System.Text.StringBuilder();
             foreach (var h in fix) oldJoined.Append(h.Screen).Append(' ');
+            if (!DeletesSafely(oldJoined.ToString()) || !DeletesSafely(cur)) return false;
             string newJoined = string.Join(" ", newTexts.ToArray()) + " ";
             // What is on screen after those words: the current word, plus the space if we already typed it.
             int tail = cur.Length + (curTyped ? d.Length : 0);
@@ -840,6 +884,7 @@ namespace TypeAssist
 
         bool OnBackspace()
         {
+            if (lastFix != null && !DeletesSafely(lastFix.Replacement)) lastFix = null;   // can't be undone safely: Backspace works normally
             if (lastFix != null && Environment.TickCount - lastFix.Tick < 8000 && Safe())
             {
                 // Undo the autocorrection: put back exactly what was typed.
@@ -939,7 +984,7 @@ namespace TypeAssist
             IntPtr layoutFix = IntPtr.Zero;
             if (whitespace)
             {
-                if (CheckLayout() == 1 && d == " " && Safe())
+                if (CheckLayout() == 1 && d == " " && Safe() && DeletesSafely(switchScreen))
                 {
                     layoutFix = LayoutFixTarget();
                     if (layoutFix != IntPtr.Zero) Log.W("wrong keyboard language: " + switchScreen.Length + " keys retyped as " + Name(switchTo));
@@ -967,7 +1012,8 @@ namespace TypeAssist
                 if (settings.AutoCorrect && IsCorrectionTrigger(d))
                 {
                     lock (engine) { fix = engine.TryCorrect(typed, PrevKey(), sentenceStart); }
-                    if (fix != null && WordInOtherLayout(typed)) fix = null;
+                    if (fix != null && WordInOtherLayout(typed, d)) fix = null;
+                    if (fix != null && !DeletesSafely(typed)) fix = null;
                 }
                 Diag("word [" + typed + "] lang=" + TextUtil.DetectLang(typed) + " → " + (fix == null ? "no fix (" + engine.Why + ")" : "fixed to [" + fix.Replacement + "]"));
                 if (wordsLogged < 40)
@@ -993,7 +1039,7 @@ namespace TypeAssist
                     swallow = true;
                     finished = fix.Replacement;
                 }
-                if (fix == null && !isEnter && (d == " " || d == "\u00A0") && settings.AutoCorrect)
+                if (fix == null && !isEnter && (d == " " || d == "\u00A0") && settings.AutoCorrect && DeletesSafely(typed))
                 {
                     List<Suggestion> c;
                     lock (engine) { c = engine.CorrectionCandidates(typed, 3); }
@@ -1009,7 +1055,8 @@ namespace TypeAssist
                 Correction fix = null;
                 if (settings.AutoCorrect && IsCorrectionTrigger(d) && typed.Length >= 4)
                     lock (engine) { fix = engine.TryCorrect(typed, null, false); }
-                if (fix != null && WordInOtherLayout(typed)) fix = null;
+                if (fix != null && WordInOtherLayout(typed, d)) fix = null;
+                if (fix != null && !DeletesSafely(typed)) fix = null;
                 if (fix != null && (fix.Replacement.Length < 1 || char.ToLowerInvariant(fix.Replacement[0]) != char.ToLowerInvariant(typed[0])))
                     fix = null;
                 Diag("first word after click [" + typed + "] → " + (fix == null ? "no fix" : "fixed to [" + fix.Replacement + "]"));
@@ -1191,7 +1238,7 @@ namespace TypeAssist
             var s = shown[index];
             segment.Clear();
             history.Clear();
-            if (alt != null && word.Length == 0 && s.Kind == SuggestionKind.Correction)
+            if (alt != null && word.Length == 0 && s.Kind == SuggestionKind.Correction && DeletesSafely(alt.Typed))
             {
                 // Replace the word just typed (and its space) with the chosen spelling.
                 var a = alt;
@@ -1209,8 +1256,10 @@ namespace TypeAssist
             string space = settings.SmartSpace ? " " : "";
             if (current.Length > 0 && text.StartsWith(current, StringComparison.Ordinal))
                 Type(0, text.Substring(current.Length) + space, releaseAlt);
-            else
+            else if (DeletesSafely(current))
                 Type(current.Length, text + space, releaseAlt);
+            else
+                return;   // can't replace what is on screen safely
             if (settings.Learn) lock (engine) { engine.Learn(prevWord2, prevWord, text); }
             word.Length = 0;
             atBoundary = true;

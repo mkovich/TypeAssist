@@ -39,7 +39,7 @@ teh ␣     →  the ␣
 
 ## دانلود و اجرا
 
-1. فایل `TypeAssist-1.6.3.zip` را از [صفحهٔ آخرین نسخه](https://github.com/mkovich/TypeAssist/releases/latest) دانلود کنید و از zip بیرون بیاورید (مثلاً در `C:\Tools\TypeAssist`).
+1. فایل `TypeAssist-1.6.4.zip` را از [صفحهٔ آخرین نسخه](https://github.com/mkovich/TypeAssist/releases/latest) دانلود کنید و از zip بیرون بیاورید (مثلاً در `C:\Tools\TypeAssist`).
 2. `TypeAssist.exe` را اجرا کنید. با .NET Framework 4.8 کار می‌کند که در ویندوز ۱۰ و ۱۱ از قبل هست.
 3. **هشدار SmartScreen ویندوز:** چون فایل امضای دیجیتال ندارد، ممکن است ویندوز پیام «Windows protected your PC» نشان دهد.
    روی **More info** و بعد **Run anyway** بزنید. این برای برنامه‌های کوچک متن‌باز بدون امضا عادی است و نشانهٔ مشکل نیست.

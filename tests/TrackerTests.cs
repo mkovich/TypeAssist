@@ -80,7 +80,7 @@ namespace TypeAssist.Tests
         public string Translate(uint vk, uint scan, bool shift, bool caps, IntPtr hkl)
         {
             if (vk == 0x07) return NextChar;                       // old-style test key (unassigned vk): the char is given
-            if (vk == 0x20) return " ";
+            if (vk == 0x20) return shift && hkl == Fa ? "\u200C" : " ";   // Persian: Shift+Space is the half-space
             string r = Map(QwertyFromVk(vk), hkl);
             return shift ? r.ToUpperInvariant() : r;
         }
@@ -90,6 +90,15 @@ namespace TypeAssist.Tests
         public bool QueueMode;
         public readonly Queue<QEvent> Pending = new Queue<QEvent>();
         public struct QEvent { public Native.KBDLLHOOKSTRUCT K; public bool Up; public char Ch; }
+
+        public bool Grapheme;   // app deletes a half-space together with the letter before it (Chrome, Telegram)
+        void Back()
+        {
+            if (Text.Length == 0) return;
+            bool z = Text[Text.Length - 1] == '\u200C';
+            Text.Length--;
+            if (z && Grapheme && Text.Length > 0) Text.Length--;
+        }
 
         public int Send(List<KeyAction> actions)
         {
@@ -110,7 +119,7 @@ namespace TypeAssist.Tests
             foreach (var a in actions)
             {
                 if (a.Up) continue;
-                if (a.Vk == Native.VK_BACK) { if (Text.Length > 0) Text.Length--; }
+                if (a.Vk == Native.VK_BACK) Back();
                 else if (a.Vk == Native.VK_RETURN) Text.Append('\n');
                 else if (a.Vk == 0) Text.Append(a.Ch);
             }
@@ -154,6 +163,15 @@ namespace TypeAssist.Tests
             foreach (char ch in text)
             {
                 if (ch == ' ') { var k0 = new Native.KBDLLHOOKSTRUCT { vkCode = 0x20 }; if (!tr.OnKeyDown(k0)) pf.Text.Append(' '); continue; }
+                if (ch == '\u200C')
+                {
+                    // half-space: Shift+Space; the app inserts it if its real keyboard is Persian
+                    pf.Down.Add(Native.VK_SHIFT);
+                    var kz = new Native.KBDLLHOOKSTRUCT { vkCode = 0x20, scanCode = 0x39 };
+                    if (!tr.OnKeyDown(kz)) pf.Text.Append(pf.Real == FakePlatform.Fa ? '\u200C' : ' ');
+                    pf.Down.Remove(Native.VK_SHIFT);
+                    continue;
+                }
                 if (ch == '\b') { Key(Native.VK_BACK, "\b"); continue; }
                 char q = FakePlatform.QwertyFor(ch);
                 var k = new Native.KBDLLHOOKSTRUCT { vkCode = FakePlatform.VkFor(q), scanCode = FakePlatform.ScanFor(q) };
@@ -453,6 +471,23 @@ namespace TypeAssist.Tests
             Keys("hello there ");
             Check("english typed while Windows says persian: untouched", "hello there ");
             pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
+
+            // ---- regressions from real use (1.6.4)
+            // Windows reports English while the app types Persian: a half-space must stay a half-space
+            Fresh("telegram"); pf.Misreports = true; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.Fa;
+            Keys("می‌خواهم سقط‌جنین ");
+            Check("misreported keyboard: half-spaces kept", "می‌خواهم سقط‌جنین ");
+            Keys("خانوادگی ");
+            Check("misreported keyboard: letters on punctuation keys are not 'corrected'", "می‌خواهم سقط‌جنین خانوادگی ");
+            pf.Misreports = false;
+            // app that deletes a half-space together with the letter before it: words must not merge
+            Fresh("chrome"); pf.Grapheme = true; pf.Reported = FakePlatform.Fa; pf.Real = FakePlatform.Fa;
+            Keys("وجود پایه‌گذران و کتاب‌هاا ");
+            Check("half-space words are never deleted and retyped", "وجود پایه‌گذران و کتاب‌هاا ");
+            Keys("میخواهم ");
+            Keys("\b");
+            Check("undo of a half-space fix is not attempted (Backspace works normally)", "وجود پایه‌گذران و کتاب‌هاا می‌خواهم");
+            pf.Grapheme = false; pf.Reported = FakePlatform.En; pf.Real = FakePlatform.En;
 
             // setting off: nothing retyped
             settings.AutoSwitchLayout = false;

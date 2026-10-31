@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.4] - 2026-10-31
+
+### Fixed
+- **Words merging or a space disappearing around words with a half-space.** Apps such as Chrome, Edge and
+  Telegram delete a half-space (ZWNJ) together with the letter before it, so fixing a word that contained one
+  deleted one character too many: the space before the word vanished and words merged
+  (`وجود پایه‌گذران` → `وجودپایه‌گذاران`). TypeAssist now never deletes and retypes text that contains a
+  half-space or a diacritic, and Backspace right after a half-space fix just works normally.
+- **A half-space turned into a real space.** When Windows reports a different keyboard than the one typing,
+  Shift+Space (the Persian half-space) was read as a plain space: the half-word before it could be "fixed" and a
+  real space written in place of the half-space. Shift+Space no longer ends a word, and the word after it is
+  never touched.
+- **Persian words "corrected" into English.** With a misreported keyboard, letters on punctuation keys
+  (`ج` on `[`, `و` on `,`, `گ` on `'`) looked like punctuation, and the rest of the word was autocorrected into an
+  English word (`خانوادگی` → `خانوhe'd`). A fix is now skipped whenever another keyboard reads the keys as one
+  word, or reads the word as any known word.
+
+### Testing
+- New simulation that types 2,000 sentences per run in bursts, with half-spaces, apps that delete half-spaces
+  with the letter before them, misreported keyboards, and an extra Arabic-script keyboard. 14,000 sentences:
+  no word lost or merged, no correct word replaced with the other language.
+
 ## [1.6.3] - 2026-10-30
 
 ### Fixed
@@ -90,6 +112,7 @@ First public release.
 - Stays off in password fields, terminals, code editors, remote desktop, password managers and full-screen games.
 - Per-app exclusions, `settings.ini`, Ctrl+Alt+F12 toggle, run-at-startup option.
 
+[1.6.4]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.4
 [1.6.3]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.3
 [1.6.2]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.2
 [1.6.1]: https://github.com/mkovich/TypeAssist/releases/tag/v1.6.1
